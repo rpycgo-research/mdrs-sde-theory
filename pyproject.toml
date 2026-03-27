@@ -1,0 +1,11 @@
+[project]
+name = "mdrs-sde-theory"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "matplotlib>=3.10.8",
+    "numba>=0.64.0",
+    "scipy>=1.17.1",
+]
