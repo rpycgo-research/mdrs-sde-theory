@@ -12,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 
 BAR_MINUTES = 5
 BARS_PER_DAY = 24 * 60 // BAR_MINUTES
@@ -130,3 +131,68 @@ def add_microstructure_signal(
     df["Z"] = (pooled + pooled.shift(1) + pooled.shift(2)) / 3.0
 
     return df
+
+
+def fit_ou_ar1(z: pd.Series, dt_days: float = DT_DAYS) -> dict:
+    """Fit an AR(1) transition and convert it to OU parameters."""
+    z = pd.Series(z).dropna().astype(float)
+    x = z.iloc[:-1].to_numpy()
+    y = z.iloc[1:].to_numpy()
+
+    mask = np.isfinite(x) & np.isfinite(y)
+    x = x[mask]
+    y = y[mask]
+
+    if len(y) < 3:
+        raise ValueError("Not enough observations to fit AR(1) transition.")
+
+    model = sm.OLS(y, sm.add_constant(x)).fit()
+    intercept, slope = model.params
+    residual_variance = float(np.mean(model.resid**2))
+
+    if 0 < slope < 1:
+        kappa = -np.log(slope) / dt_days
+        zbar = intercept / (1 - slope)
+        sigma_z = np.sqrt(residual_variance * 2 * kappa / (1 - slope**2))
+        half_life_hours = 24 * np.log(2) / kappa
+    else:
+        kappa = np.nan
+        zbar = np.nan
+        sigma_z = np.nan
+        half_life_hours = np.nan
+
+    return {
+        "a": float(intercept),
+        "b": float(slope),
+        "kappa_per_day": float(kappa),
+        "half_life_hours": float(half_life_hours),
+        "zbar": float(zbar),
+        "sigmaZ_per_sqrt_day": float(sigma_z),
+        "r2": float(model.rsquared),
+        "n": int(len(y)),
+    }
+
+
+def ou_oos_diagnostics(z: pd.Series, fit: dict) -> dict:
+    """Evaluate one-step AR(1)-to-OU transition diagnostics out of sample."""
+    z = pd.Series(z).dropna().astype(float)
+    x = z.iloc[:-1].to_numpy()
+    y = z.iloc[1:].to_numpy()
+
+    mask = np.isfinite(x) & np.isfinite(y)
+    x = x[mask]
+    y = y[mask]
+
+    if len(y) == 0:
+        return {"n": 0, "r2_oos": np.nan, "rmse": np.nan, "corr": np.nan}
+
+    pred = fit["a"] + fit["b"] * x
+    sse = float(np.sum((y - pred) ** 2))
+    sst = float(np.sum((y - y.mean()) ** 2))
+
+    return {
+        "n": int(len(y)),
+        "r2_oos": float(1 - sse / sst) if sst > 0 else np.nan,
+        "rmse": float(np.sqrt(np.mean((y - pred) ** 2))),
+        "corr": float(np.corrcoef(y, pred)[0, 1]) if len(y) > 1 else np.nan,
+    }
