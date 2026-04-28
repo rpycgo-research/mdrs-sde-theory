@@ -101,40 +101,60 @@ def experiment_1_trajectory(sim: MDRSSimulator) -> None:
 
 
 # ===================================================================
-# Experiment 2: Sensitivity of E[τ_r*] to γ  (Figure 2)
+# Experiment 2: Sensitivity of finite-horizon breakout time to gamma
 # ===================================================================
 def experiment_2_sensitivity(sim: MDRSSimulator, num_paths: int = 2000) -> None:
-    print("\n=== Experiment 2: IC-Alpha Sensitivity (Figure 2) ===")
-    print(f"  (Using {num_paths} paths per γ value)")
+    print("\n=== Experiment 2: Finite-Horizon Breakout Sensitivity (Figure 2) ===")
+    print(f"  Using {num_paths} paths per gamma value")
 
     gammas = np.linspace(0.5, 3.5, 12)
-    means, ses = [], []
+    means, ses, censor_rates = [], [], []
     r_star = 0.1
+    num_steps = 1000
+    dt = 0.01
 
     for g in gammas:
-        out = sim.run(num_paths=num_paths, num_steps=1000, dt=0.01, gamma_override=g, seed=42)
+        out = sim.run(num_paths=num_paths, num_steps=num_steps, dt=dt, gamma_override=float(g), seed=42)
         prices = out["price"]
         hit = np.abs(prices) >= r_star
+        ever_hit = hit.any(axis=0)
         idx = np.argmax(hit, axis=0)
-        idx[~hit.any(axis=0)] = prices.shape[0] - 1
-        tau = idx * 0.01
-        m, se = tau.mean(), tau.std() / np.sqrt(len(tau))
+        idx[~ever_hit] = prices.shape[0] - 1
+        tau = idx * dt
+        m, se = tau.mean(), tau.std(ddof=1) / np.sqrt(len(tau))
+        censor = 1.0 - ever_hit.mean()
         means.append(m)
         ses.append(se)
-        print(f"  γ={g:.2f}  E[τ]={m:.4f}  SE={se:.4f}")
+        censor_rates.append(censor)
+        print(f"  gamma={g:.2f}  finite-horizon E[tau]={m:.4f}  SE={se:.4f}  censor={censor:.2%}")
 
     plt.figure(figsize=(8, 5))
-    plt.errorbar(gammas, means, yerr=1.96 * np.array(ses),
-                 marker="o", color="darkblue", lw=2, capsize=4,
-                 label=r"$\mathbb{E}[\tau_{r^*}] \pm 1.96\,SE$")
-    plt.title("Expected Breakout Time Sensitivity (Resolution of IC-Alpha Paradox)")
+    plt.errorbar(
+        gammas,
+        means,
+        yerr=1.96 * np.array(ses),
+        marker="o",
+        color="darkblue",
+        lw=2,
+        capsize=4,
+        label=r"Finite-horizon $\mathbb{E}[\tau_{r^*}] \pm 1.96\,SE$",
+    )
+    plt.title("Finite-Horizon Breakout-Time Sensitivity")
     plt.xlabel(r"Activation Threshold ($\gamma$)")
-    plt.ylabel(r"Expected First-Passage Time $\mathbb{E}[\tau_{r^*}]$")
+    plt.ylabel(r"Estimated First-Passage Time")
     plt.grid(True, ls="--", alpha=0.7)
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(FIGURE_DIR, "fig2_sensitivity.png"), dpi=300)
     print("  Saved fig2_sensitivity.png")
+
+    np.savetxt(
+        os.path.join(TABLE_DIR, "table_breakout_sensitivity.csv"),
+        np.column_stack([gammas, means, ses, censor_rates]),
+        delimiter=",",
+        header="gamma,finite_horizon_mean_tau,se,censor_rate",
+        comments="",
+    )
 
 
 # ===================================================================
