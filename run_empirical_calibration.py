@@ -8,7 +8,6 @@ Datetime, Open, High, Low, Close, Volume
 Default asset filenames match the 5-minute perpetual futures files used in the
 paper experiments.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -46,6 +45,9 @@ OUTPUT_TABLES = {
     "volatility_prediction_hac.csv": "vol_rows",
     "return_moments_batch_means.csv": "moment_rows",
 }
+
+MAIN_ASSETS = ("BTC", "ETH")
+ROBUSTNESS_ASSETS = ("XRP", "SOL")
 
 
 def parse_asset_files(items: list[str] | None) -> list[AssetFile]:
@@ -235,16 +237,51 @@ def save_outputs(
         print(f"[save] {output_path} ({len(rows)} rows)")
 
 
-def print_compact_summary(outputs: dict[str, list[dict]]) -> None:
-    """Print compact BTC/ETH summaries for quick inspection."""
-    if outputs["ou_rows"]:
-        ou = pd.DataFrame(outputs["ou_rows"])
-        print("\nOU calibration summary:")
-        print(ou.query("Asset in ['BTC', 'ETH']").to_string(index=False))
+def print_table_block(
+    *,
+    title: str,
+    rows: list[dict],
+    assets: tuple[str, ...],
+    columns: list[str] | None = None,
+    query: str | None = None,
+) -> None:
+    """Print a filtered table block for selected assets."""
+    if not rows:
+        print(f"\n{title}: no rows")
+        return
 
-    if outputs["leaky_rows"]:
-        leaky = pd.DataFrame(outputs["leaky_rows"])
-        columns = [
+    table = pd.DataFrame(rows)
+    table = table[table["Asset"].isin(assets)]
+
+    if query:
+        table = table.query(query)
+
+    if columns:
+        table = table[columns]
+
+    print(f"\n{title}:")
+    if table.empty:
+        print("No rows")
+    else:
+        print(table.to_string(index=False))
+
+
+def print_compact_summary(outputs: dict[str, list[dict]]) -> None:
+    """Print compact main-asset and robustness summaries."""
+    print("\n=== Main empirical assets: BTC / ETH ===")
+
+    print_table_block(
+        title="OU calibration summary",
+        rows=outputs["ou_rows"],
+        assets=MAIN_ASSETS,
+    )
+
+    print_table_block(
+        title="Leaky-extrema test summary",
+        rows=outputs["leaky_rows"],
+        assets=MAIN_ASSETS,
+        query="Split == 'test'",
+        columns=[
             "Asset",
             "Split",
             "fast_hl_hours",
@@ -252,16 +289,15 @@ def print_compact_summary(outputs: dict[str, list[dict]]) -> None:
             "Mean_MAE",
             "Corr_R",
             "Corr_S",
-        ]
-        print("\nLeaky-extrema test summary:")
-        print(
-            leaky.query("Asset in ['BTC', 'ETH'] and Split == 'test'")[columns]
-            .to_string(index=False)
-        )
+        ],
+    )
 
-    if outputs["vol_rows"]:
-        vol = pd.DataFrame(outputs["vol_rows"])
-        columns = [
+    print_table_block(
+        title="Volatility-prediction test summary",
+        rows=outputs["vol_rows"],
+        assets=MAIN_ASSETS,
+        query="Split == 'test'",
+        columns=[
             "Asset",
             "Split",
             "Horizon",
@@ -269,12 +305,48 @@ def print_compact_summary(outputs: dict[str, list[dict]]) -> None:
             "t_Z_HAC",
             "p_Z_HAC",
             "R2",
-        ]
-        print("\nVolatility-prediction test summary:")
-        print(
-            vol.query("Asset in ['BTC', 'ETH'] and Split == 'test'")[columns]
-            .to_string(index=False)
-        )
+        ],
+    )
+
+    print("\n=== Robustness assets: XRP / SOL ===")
+
+    print_table_block(
+        title="OU calibration robustness summary",
+        rows=outputs["ou_rows"],
+        assets=ROBUSTNESS_ASSETS,
+    )
+
+    print_table_block(
+        title="Leaky-extrema test robustness summary",
+        rows=outputs["leaky_rows"],
+        assets=ROBUSTNESS_ASSETS,
+        query="Split == 'test'",
+        columns=[
+            "Asset",
+            "Split",
+            "fast_hl_hours",
+            "slow_hl_hours",
+            "Mean_MAE",
+            "Corr_R",
+            "Corr_S",
+        ],
+    )
+
+    print_table_block(
+        title="Volatility-prediction test robustness summary",
+        rows=outputs["vol_rows"],
+        assets=ROBUSTNESS_ASSETS,
+        query="Split == 'test'",
+        columns=[
+            "Asset",
+            "Split",
+            "Horizon",
+            "coef_Z",
+            "t_Z_HAC",
+            "p_Z_HAC",
+            "R2",
+        ],
+    )
 
 
 def main() -> None:
