@@ -1,7 +1,7 @@
 """
 Implements the three main experiments from Section 4 of the paper.
 
-  Experiment 1 — Figure 1: 4D trajectory with latched extrema
+  Experiment 1 — Figure 1: 4D trajectory with leaky/latched extrema
   Experiment 2 — Figure 2: E[τ_r*] sensitivity to γ  (IC-Alpha resolution)
   Experiment 3 — Figure 3 + Tables 1-2: Ergodicity & volatility identification
 """
@@ -23,7 +23,7 @@ def experiment_1_trajectory(sim: MDRSSimulator) -> None:
     print("\n=== Experiment 1: Trajectory (Figure 1) ===")
     out = sim.run(num_paths=500, num_steps=500, dt=0.01, seed=42)
 
-    # Select a path that clearly shows latching
+    # Select a path that clearly shows leaky-extrema tracking and freezing
     best, best_score = 0, -1.0
     for i in range(out["signal"].shape[1]):
         sig = out["signal"][:, i]
@@ -36,8 +36,11 @@ def experiment_1_trajectory(sim: MDRSSimulator) -> None:
     print(f"  Selected path {best} (score {best_score:.1f})")
 
     t = np.arange(500) * 0.01
-    p, r, s = out["price"][:, best], out["resistance"][:, best], out["support"][:, best]
-    z, w = out["signal"][:, best], out["weight"][:, best]
+    p = out["price"][:, best]
+    r = out["resistance"][:, best]
+    s = out["support"][:, best]
+    z = out["signal"][:, best]
+    w = out["weight"][:, best]
     latched = z >= sim.zeta
 
     fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
@@ -46,7 +49,7 @@ def experiment_1_trajectory(sim: MDRSSimulator) -> None:
     axes[0].plot(t, r, "r--", label=r"Resistance ($R_t$)")
     axes[0].plot(t, s, "b--", label=r"Support ($S_t$)")
     axes[0].set_ylabel("Price Level")
-    axes[0].set_title("MDRS-SDE Dynamics: Latched Extrema during Breakouts")
+    axes[0].set_title("MDRS-SDE Dynamics: Leaky Extrema during Breakouts")
 
     axes[1].plot(t, z, "purple", label=r"Signal ($Z_t$)")
     axes[1].axhline(sim.zeta, color="gray", ls=":", label=r"Quiet Threshold ($\zeta$)")
