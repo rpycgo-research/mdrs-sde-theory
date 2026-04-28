@@ -106,3 +106,27 @@ def data_coverage(df: pd.DataFrame, asset: str) -> dict:
         row[f"{split}_rows"] = len(split_sample(df, split))
 
     return row
+
+
+def add_microstructure_signal(
+    df: pd.DataFrame,
+    window: int = ROLLING_WINDOW,
+    ) -> pd.DataFrame:
+    """Construct the empirical max-pooled microstructure signal.
+
+    Rolling moments are shifted by one bar, so the signal is past-adapted.
+    The return component uses absolute log returns because the signal is meant
+    to capture volatility/activation magnitude rather than signed direction.
+    """
+    df = df.copy()
+
+    for feature, output_column in [("log_volume", "zV"), ("abs_ret", "zR")]:
+        rolling = df[feature].rolling(window, min_periods=window)
+        mean = rolling.mean().shift(1)
+        std = rolling.std(ddof=0).shift(1)
+        df[output_column] = (df[feature] - mean) / std.replace(0, np.nan)
+
+    pooled = np.maximum(df["zV"], df["zR"])
+    df["Z"] = (pooled + pooled.shift(1) + pooled.shift(2)) / 3.0
+
+    return df
