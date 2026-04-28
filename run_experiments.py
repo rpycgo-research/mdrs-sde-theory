@@ -3,7 +3,7 @@ Implements the three main experiments from Section 4 of the paper.
 
   Experiment 1 — Figure 1: 4D trajectory with leaky/latched extrema
   Experiment 2 — Figure 2: E[τ_r*] sensitivity to γ  (IC-Alpha resolution)
-  Experiment 3 — Figure 3 + Tables 1-2: Ergodicity & volatility identification
+  Experiment 3 — Figure 3 + Tables 1-2: long-run stability and volatility identification
 """
 import os
 import numpy as np
@@ -108,10 +108,10 @@ def experiment_2_sensitivity(sim: MDRSSimulator, num_paths: int = 2000) -> None:
 
 
 # ===================================================================
-# Experiment 3: Ergodicity + Volatility Identification  (Fig 3, Tables 1-2)
+# Experiment 3: Long-run stability + volatility identification
 # ===================================================================
-def experiment_3_ergodicity(sim: MDRSSimulator, num_steps: int = 10_000_000) -> None:
-    print(f"\n=== Experiment 3: Ergodicity (N={num_steps:,}) ===")
+def experiment_3_long_run_stability(sim: MDRSSimulator, num_steps: int = 2_000_000) -> None:
+    print(f"\n=== Experiment 3: Long-Run Stability (N={num_steps:,}) ===")
 
     out = sim.run(num_paths=1, num_steps=num_steps, dt=0.01, seed=42)
     p = out["price"][:, 0]
@@ -156,8 +156,8 @@ def experiment_3_ergodicity(sim: MDRSSimulator, num_steps: int = 10_000_000) -> 
     plt.legend()
     plt.grid(True, ls="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_DIR, "fig3_ergodicity.png"), dpi=300)
-    print("  Saved fig3_ergodicity.png")
+    plt.savefig(os.path.join(FIGURE_DIR, "fig3_long_run_distribution.png"), dpi=300)
+    print("  Saved fig3_long_run_distribution.png")
 
 
 # ===================================================================
@@ -166,6 +166,6 @@ if __name__ == "__main__":
 
     experiment_1_trajectory(sim)
     experiment_2_sensitivity(sim)
-    experiment_3_ergodicity(sim, num_steps=2_000_000)
+    experiment_3_long_run_stability(sim, num_steps=2_000_000)
 
     print("\n=== All paper reproduction experiments complete. ===")
