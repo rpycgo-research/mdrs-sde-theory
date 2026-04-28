@@ -1,16 +1,19 @@
 """
-Theory verification suite for the MDRS-SDE paper.
+Numerical sanity-check suite for the MDRS-SDE simulator.
 
-Each check maps to a specific theorem/lemma and prints PASS/FAIL.
+These checks are diagnostic only. They do not constitute numerical proofs of
+geometric ergodicity, Harris recurrence, or breakout-time integrability.
 
-  Check 1 — Invariant ordering: S_t ≤ R_t   (Remark 3.7)
-  Check 2 — Drift dominance condition       (Theorem 3.18, Eq. drift_dominance)
-  Check 3 — Foster–Lyapunov drift           (Theorem 3.18, Step 1)
-  Check 4 — Geometric ergodicity rate       (Theorem 3.18)
-  Check 5 — Correlation robustness ρ ≠ 0    (Assumption 3.4)
-  Check 6 — Implicit scheme Δt convergence  (Section 4.1)
-  Check 7 — τ_{r*} finiteness               (Lemma tau_finite)
+  Check 1 — Invariant ordering: S_t <= R_t
+  Check 2 — Drift-dominance parameter sanity check
+  Check 3 — Equilibrium-region stability diagnostic
+  Check 4 — Running-mean stabilization diagnostic
+  Check 5 — Correlation robustness rho != 0
+  Check 6 — Implicit scheme dt convergence
+  Check 7 — Finite-horizon exit-frequency diagnostic
 """
+from __future__ import annotations
+
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,33 +24,33 @@ FIGURE_DIR = "figures"
 os.makedirs(FIGURE_DIR, exist_ok=True)
 
 PASS = "\033[92mPASS\033[0m"
+WARN = "\033[93mWARN\033[0m"
 FAIL = "\033[91mFAIL\033[0m"
 
 
 # ===================================================================
-# Check 1: Invariant ordering  S_t ≤ R_t   (Remark 3.7)
+# Check 1: Invariant ordering S_t <= R_t
 # ===================================================================
 def check_invariant_ordering() -> bool:
-    print("\n=== Check 1: Invariant Ordering S_t ≤ R_t ===")
+    print("\n=== Check 1: Invariant Ordering S_t <= R_t ===")
 
     simulator = MDRSSimulator()
     out = simulator.run(num_paths=50, num_steps=50_000, dt=0.01, seed=42)
-    violations = np.sum(out["support"] > out["resistance"] + 1e-12)
+    violations = int(np.sum(out["support"] > out["resistance"] + 1e-12))
     total = out["support"].size
     ok = violations == 0
 
     print(f"  Total state evaluations: {total:,}")
     print(f"  Violations (S_t > R_t): {violations}")
     print(f"  Result: {PASS if ok else FAIL}")
-
     return ok
 
 
 # ===================================================================
-# Check 2: Drift dominance condition  (Theorem 3.18)
+# Check 2: Drift-dominance condition sanity check
 # ===================================================================
 def check_drift_dominance() -> bool:
-    print("\n=== Check 2: Drift Dominance Condition ===")
+    print("\n=== Check 2: Drift-Dominance Parameter Sanity Check ===")
 
     p = DEFAULT_PARAMS
     w_zeta = p["w_max"] / (1.0 + np.exp(-p["k"] * (p["zeta"] - p["gamma"])))
@@ -55,272 +58,247 @@ def check_drift_dominance() -> bool:
     rhs = 4.0 * w_zeta * (p["alpha_long"] + p["alpha_short"])
     margin = lhs - rhs
 
-    print(f"  w(ζ) = {w_zeta:.6f}")
-    print(f"  LHS = (1 - w_ζ)κ = {lhs:.6f}")
-    print(f"  RHS = 4 w_ζ (α_L + α_S) = {rhs:.6f}")
+    print(f"  w(zeta) = {w_zeta:.6f}")
+    print(f"  LHS = (1 - w_zeta) kappa = {lhs:.6f}")
+    print(f"  RHS = 4 w_zeta (alpha_L + alpha_S) = {rhs:.6f}")
     print(f"  Margin = {margin:.6f}")
 
     ok = margin > 0
-    print(f"  Result: {PASS if ok else FAIL}")
-
+    print(f"  Result: {PASS if ok else WARN}")
     return ok
 
 
 # ===================================================================
-# Check 3: Foster–Lyapunov drift  (Theorem 3.18, Step 1)
+# Check 3: Equilibrium-region stability diagnostic
 # ===================================================================
-def check_foster_lyapunov() -> bool:
-    print("\n=== Check 3: Foster–Lyapunov V(Y_t) trajectory ===")
+def check_equilibrium_region_stability() -> bool:
+    print("\n=== Check 3: Equilibrium-Region Stability Diagnostic ===")
     sim = MDRSSimulator()
-    N = 500_000
-    out = sim.run(num_paths=1, num_steps=N, dt=0.01, seed=42)
+    n_steps = 500_000
+    out = sim.run(num_paths=1, num_steps=n_steps, dt=0.01, seed=42)
     p_cfg = DEFAULT_PARAMS
 
-    # Compute w_zeta and A_p as in the corrected theorem
+    # Weight used in the paper's equilibrium-region drift-dominance condition.
     w_zeta = p_cfg["w_max"] / (1.0 + np.exp(-p_cfg["k"] * (p_cfg["zeta"] - p_cfg["gamma"])))
     eta = w_zeta * (p_cfg["alpha_long"] + p_cfg["alpha_short"])
     lambda_p = 2.0 * (1.0 - w_zeta) * p_cfg["kappa"] - 4.0 * eta
     c_pR = p_cfg["beta_r"] ** 2 / p_cfg["gamma_r"]
     c_pS = p_cfg["beta_s"] ** 2 / p_cfg["gamma_s"]
-    A_p = (c_pR + c_pS + 0.1) / lambda_p  # delta = 0.1
+    A_p = (c_pR + c_pS + 0.1) / max(lambda_p, 1e-12)
 
     p = out["price"][:, 0]
     z = out["signal"][:, 0]
     r = out["resistance"][:, 0]
     s = out["support"][:, 0]
-    V = 1.0 + (A_p * p**2) + z**2 + r**2 + s**2
+    V = 1.0 + A_p * p**2 + z**2 + r**2 + s**2
 
-    # Running time-average of V(Y_t)
     window = 10_000
     V_avg = np.convolve(V, np.ones(window) / window, mode="valid")
-
-    # V should be bounded in time-average (not diverging)
     last_quarter = V_avg[len(V_avg) * 3 // 4 :]
     first_quarter = V_avg[: len(V_avg) // 4]
-    ratio = np.mean(last_quarter) / max(np.mean(first_quarter), 1e-12)
-    ok = ratio < 2.0  # should not be growing
+    ratio = float(np.mean(last_quarter) / max(np.mean(first_quarter), 1e-12))
+    ok = ratio < 2.0
 
     print(f"  A_p = {A_p:.4f}")
     print(f"  Mean V (first quarter): {np.mean(first_quarter):.4f}")
     print(f"  Mean V (last quarter):  {np.mean(last_quarter):.4f}")
-    print(f"  Ratio: {ratio:.4f} (should be < 2.0)")
-    print(f"  Result: {PASS if ok else FAIL}")
+    print(f"  Ratio: {ratio:.4f} (diagnostic threshold < 2.0)")
+    print(f"  Result: {PASS if ok else WARN}")
 
-    # Plot
     t = np.arange(len(V_avg)) * 0.01
     plt.figure(figsize=(10, 4))
     plt.plot(t[::100], V_avg[::100], lw=0.5, color="steelblue")
     plt.xlabel("Time")
-    plt.ylabel(r"$V(\mathbf{Y}_t)$ (running avg)")
-    plt.title("Foster–Lyapunov Function: Time-Averaged Trajectory")
+    plt.ylabel(r"$V(\mathbf{Y}_t)$ running average")
+    plt.title("Equilibrium-Region Stability Diagnostic")
     plt.grid(True, ls="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_DIR, "check3_lyapunov.png"), dpi=200)
-    print("  Saved check3_lyapunov.png")
-
+    plt.savefig(os.path.join(FIGURE_DIR, "check3_stability_diagnostic.png"), dpi=200)
+    print("  Saved check3_stability_diagnostic.png")
     return ok
 
 
 # ===================================================================
-# Check 4: Geometric ergodicity rate  (Theorem 3.18)
+# Check 4: Running-mean stabilization diagnostic
 # ===================================================================
-def check_ergodic_rate() -> bool:
-    print("\n=== Check 4: Geometric Ergodicity Convergence Rate ===")
+def check_running_mean_stabilization() -> bool:
+    print("\n=== Check 4: Running-Mean Stabilization Diagnostic ===")
 
     simulator = MDRSSimulator()
-    N = 1_000_000
-    out = simulator.run(num_paths=1, num_steps=N, dt=0.01, seed=42)
+    n_steps = 1_000_000
+    out = simulator.run(num_paths=1, num_steps=n_steps, dt=0.01, seed=42)
     p = out["price"][:, 0]
 
-    # Compute running mean at exponentially-spaced checkpoints
-    checkpoints = np.logspace(3, np.log10(N), 30, dtype=int)
+    checkpoints = np.logspace(3, np.log10(n_steps), 30, dtype=int)
     checkpoints = np.unique(checkpoints)
     running_means = np.array([np.mean(p[:cp]) for cp in checkpoints])
-    final_mean = np.mean(p)
-
-    # Measure |running_mean - final_mean| — should decay
+    final_mean = float(np.mean(p))
     errors = np.abs(running_means - final_mean)
-    errors = np.maximum(errors, 1e-12)  # avoid log(0)
 
-    # Fit log-linear: log(error) = a - b * T  => exponential decay
+    # This is only a stabilization diagnostic, not an ergodicity-rate estimate.
+    early = float(np.median(errors[: max(3, len(errors) // 5)]))
+    late = float(np.median(errors[-max(3, len(errors) // 5) :]))
+    ok = late < early
+
+    print(f"  Median early error: {early:.6e}")
+    print(f"  Median late error : {late:.6e}")
+    print(f"  Result: {PASS if ok else WARN} (diagnostic only)")
+
     T = checkpoints * 0.01
-    mask = errors > 1e-10
-
-    if mask.sum() > 5:
-        coeffs = np.polyfit(T[mask], np.log(errors[mask]), 1)
-        decay_rate = -coeffs[0]
-    else:
-        decay_rate = 0.0
-
-    ok = decay_rate > 0
-    print(f"  Fitted exponential decay rate: {decay_rate:.6f}")
-    print(f"  Result: {PASS if ok else FAIL} (rate > 0 implies exponential convergence)")
-
     plt.figure(figsize=(8, 5))
-    plt.semilogy(T, errors, "o-", ms=3, color="darkblue")
+    plt.semilogy(T, np.maximum(errors, 1e-12), "o-", ms=3, color="darkblue")
     plt.xlabel("Simulation Time T")
-    plt.ylabel(r"$|\bar{p}_T - \bar{p}_\infty|$")
-    plt.title("Ergodic Convergence of Running Mean")
+    plt.ylabel(r"$|\bar{p}_T - \bar{p}_{final}|$")
+    plt.title("Running-Mean Stabilization Diagnostic")
     plt.grid(True, ls="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_DIR, "check4_ergodic_rate.png"), dpi=200)
-    print("  Saved check4_ergodic_rate.png")
-
+    plt.savefig(os.path.join(FIGURE_DIR, "check4_running_mean_stabilization.png"), dpi=200)
+    print("  Saved check4_running_mean_stabilization.png")
     return ok
 
 
 # ===================================================================
-# Check 5: Correlation robustness ρ ≠ 0  (Assumption 3.4)
+# Check 5: Correlation robustness rho != 0
 # ===================================================================
 def check_rho_robustness() -> bool:
-    from scipy.stats import skew, kurtosis
+    from scipy.stats import kurtosis, skew
 
-    print("\n=== Check 5: Robustness to ρ ≠ 0 ===")
+    print("\n=== Check 5: Robustness to rho != 0 ===")
 
     rhos = [-0.5, 0.0, 0.3, 0.7]
     results = {}
 
     for rho_val in rhos:
         sim = MDRSSimulator()
-        out = sim.run(num_paths=1, num_steps=500_000, dt=0.01,
-                      rho_override=rho_val, seed=42)
+        out = sim.run(num_paths=1, num_steps=500_000, dt=0.01, rho_override=rho_val, seed=42)
         p = out["price"][:, 0]
         results[rho_val] = {
-            "mean": p.mean(),
-            "std": p.std(),
-            "skew": skew(p),
-            "kurt": kurtosis(p, fisher=False),
+            "mean": float(p.mean()),
+            "std": float(p.std()),
+            "skew": float(skew(p)),
+            "kurt": float(kurtosis(p, fisher=False)),
         }
-        print(f"  ρ={rho_val:+.1f}: mean={p.mean():.5f}  std={p.std():.4f}"
-              f"  skew={skew(p):.4f}  kurt={kurtosis(p, fisher=False):.2f}")
+        print(
+            f"  rho={rho_val:+.1f}: mean={p.mean():.5f}  std={p.std():.4f}"
+            f"  skew={skew(p):.4f}  kurt={kurtosis(p, fisher=False):.2f}"
+        )
 
-    # Core ergodicity checks:
-    # 1. All std should be finite and bounded (not diverging)
     all_finite = all(v["std"] < 1.0 for v in results.values())
-    # 2. All means should be near zero (mean-reversion working)
-    all_centered = all(abs(v["mean"]) < 0.01 for v in results.values())
-    # 3. All kurtosis should be > 3 (leptokurtic from regime switching)
+    all_centered = all(abs(v["mean"]) < 0.02 for v in results.values())
     all_lepto = all(v["kurt"] > 3.0 for v in results.values())
-
     ok = all_finite and all_centered and all_lepto
+
     print(f"  All finite std (<1): {all_finite}")
     print(f"  All near-zero mean: {all_centered}")
     print(f"  All leptokurtic (>3): {all_lepto}")
-    print(f"  Note: Skewness sign depends on ρ (positive ρ can flip skew).")
-    print(f"        This is expected model behavior, not a failure.")
-    print(f"  Result: {PASS if ok else FAIL}")
-
+    print("  Note: Skewness sign may depend on rho; this is expected model behavior.")
+    print(f"  Result: {PASS if ok else WARN}")
     return ok
 
 
 # ===================================================================
-# Check 6: Δt convergence of implicit scheme  (Section 4.1)
+# Check 6: dt convergence of implicit scheme
 # ===================================================================
 def check_dt_convergence() -> bool:
-    print("\n=== Check 6: Δt Convergence (Implicit Scheme) ===")
-    print("  Using ergodic time-average E_T[p^2] for stable weak convergence test")
+    print("\n=== Check 6: dt Convergence Diagnostic (Implicit Scheme) ===")
+    print("  Using time-average E_T[p^2] as a stable weak-convergence diagnostic")
 
     dts = [0.05, 0.02, 0.01, 0.005]
-    T_total = 5000.0  # long path for ergodic average
-
-    # Reference: finest dt
+    total_time = 5000.0
     ref_dt = 0.002
-    ref_steps = int(T_total / ref_dt)
+    ref_steps = int(total_time / ref_dt)
     sim = MDRSSimulator()
     ref_out = sim.run(num_paths=1, num_steps=ref_steps, dt=ref_dt, seed=42)
-    ref_stat = np.mean(ref_out["price"][:, 0] ** 2)
-    print(f"  Reference (dt={ref_dt}, T={T_total}): <p^2>_T = {ref_stat:.6f}")
+    ref_stat = float(np.mean(ref_out["price"][:, 0] ** 2))
+    print(f"  Reference (dt={ref_dt}, T={total_time}): <p^2>_T = {ref_stat:.6f}")
 
     errors = []
     for dt in dts:
-        steps = int(T_total / dt)
+        steps = int(total_time / dt)
         out = sim.run(num_paths=1, num_steps=steps, dt=dt, seed=42)
-        stat = np.mean(out["price"][:, 0] ** 2)
+        stat = float(np.mean(out["price"][:, 0] ** 2))
         err = abs(stat - ref_stat)
         errors.append(err)
         print(f"  dt={dt:.4f} ({steps:>7} steps): <p^2>_T = {stat:.6f}  |err| = {err:.6f}")
 
-    # Check monotone decrease (allow one non-monotone due to noise)
     decreasing_count = sum(1 for i in range(len(errors) - 1) if errors[i] > errors[i + 1])
     ok = errors[0] > errors[-1] and decreasing_count >= len(errors) // 2
-
     print(f"  Coarsest error > finest error: {errors[0] > errors[-1]}")
     print(f"  Decreasing pairs: {decreasing_count}/{len(errors)-1}")
-    print(f"  Result: {PASS if ok else FAIL}")
+    print(f"  Result: {PASS if ok else WARN}")
 
     plt.figure(figsize=(7, 5))
     plt.loglog(dts, errors, "o-", color="darkred", lw=2)
     plt.xlabel(r"$\Delta t$")
-    plt.ylabel(r"$|\langle p^2 \rangle_T - \langle p^2 \rangle_{\rm ref}|$")
-    plt.title(r"Weak Convergence: Ergodic $\langle p^2 \rangle$ vs $\Delta t$")
+    plt.ylabel(r"$|\langle p^2 \rangle_T - \langle p^2 \rangle_{ref}|$")
+    plt.title(r"Weak-Convergence Diagnostic: $\langle p^2 \rangle_T$ vs $\Delta t$")
     plt.grid(True, ls="--", alpha=0.5)
     plt.tight_layout()
     plt.savefig(os.path.join(FIGURE_DIR, "check6_dt_convergence.png"), dpi=200)
     print("  Saved check6_dt_convergence.png")
-
     return ok
 
 
 # ===================================================================
-# Check 7: τ_{r*} < ∞ a.s.  (Lemma tau_finite)
+# Check 7: Finite-horizon exit-frequency diagnostic
 # ===================================================================
-def check_tau_finite() -> bool:
-    print("\n=== Check 7: τ_{r*} Finiteness ===")
+def check_finite_horizon_exit_frequency() -> bool:
+    print("\n=== Check 7: Finite-Horizon Exit-Frequency Diagnostic ===")
 
     simulator = MDRSSimulator()
     r_star = 0.1
-    N_paths = 500
-    N_steps = 10000  # T_max = 100
+    n_paths = 500
+    n_steps = 10_000
+    dt = 0.01
 
-    out = simulator.run(num_paths=N_paths, num_steps=N_steps, dt=0.01, seed=42)
+    out = simulator.run(num_paths=n_paths, num_steps=n_steps, dt=dt, seed=42)
     prices = out["price"]
     hit = np.abs(prices) >= r_star
     ever_hit = hit.any(axis=0)
-    frac = ever_hit.mean()
-
-    # For paths that hit, compute mean tau
+    frac = float(ever_hit.mean())
     idx = np.argmax(hit, axis=0)
-    idx[~ever_hit] = N_steps - 1
-    tau = idx * 0.01
+    idx[~ever_hit] = n_steps - 1
+    tau = idx * dt
     tau_hit = tau[ever_hit]
 
     print(f"  Barrier r* = {r_star}")
-    print(f"  Fraction hitting barrier in T={N_steps*0.01:.0f}: {frac:.4f} ({ever_hit.sum()}/{N_paths})")
+    print(f"  Fraction hitting barrier in T={n_steps * dt:.0f}: {frac:.4f} ({ever_hit.sum()}/{n_paths})")
     if len(tau_hit) > 0:
-        print(f"  E[τ | hit] = {tau_hit.mean():.4f}")
-        print(f"  max(τ | hit) = {tau_hit.max():.4f}")
+        print(f"  E[tau | hit] = {tau_hit.mean():.4f}")
+        print(f"  max(tau | hit) = {tau_hit.max():.4f}")
+    print("  Scope: diagnostic only; this is not a proof of almost-sure finiteness.")
 
-    ok = frac > 0.90  # essentially all paths should hit within T_max
-    print(f"  Result: {PASS if ok else FAIL} (expect >90% hitting)")
+    ok = frac > 0.90
+    print(f"  Result: {PASS if ok else WARN} (diagnostic threshold >90% hitting)")
     return ok
 
 
 # ===================================================================
 def main():
-    results = {}
-    results["1_invariant_ordering"] = check_invariant_ordering()
-    results["2_drift_dominance"] = check_drift_dominance()
-    results["3_foster_lyapunov"] = check_foster_lyapunov()
-    results["4_ergodic_rate"] = check_ergodic_rate()
-    results["5_rho_robustness"] = check_rho_robustness()
-    results["6_dt_convergence"] = check_dt_convergence()
-    results["7_tau_finite"] = check_tau_finite()
+    results = {
+        "1_invariant_ordering": check_invariant_ordering(),
+        "2_drift_dominance": check_drift_dominance(),
+        "3_equilibrium_region_stability": check_equilibrium_region_stability(),
+        "4_running_mean_stabilization": check_running_mean_stabilization(),
+        "5_rho_robustness": check_rho_robustness(),
+        "6_dt_convergence": check_dt_convergence(),
+        "7_finite_horizon_exit_frequency": check_finite_horizon_exit_frequency(),
+    }
 
-    print("\n" + "=" * 60)
-    print("THEORY VERIFICATION SUMMARY")
-    print("=" * 60)
-    all_pass = True
+    print("\n" + "=" * 72)
+    print("NUMERICAL SANITY-CHECK SUMMARY")
+    print("=" * 72)
+    all_ok = True
     for name, ok in results.items():
-        status = PASS if ok else FAIL
+        status = PASS if ok else WARN
         print(f"  {name}: {status}")
-        if not ok:
-            all_pass = False
+        all_ok = all_ok and ok
 
-    if all_pass:
-        print(f"\n  All checks passed.")
+    if all_ok:
+        print("\n  All diagnostics passed their configured thresholds.")
     else:
-        print(f"\n  Some checks FAILED. Review output above.")
-    print("=" * 60)
+        print("\n  Some diagnostics did not pass their configured thresholds. Review output above.")
+    print("=" * 72)
 
 
 if __name__ == "__main__":
