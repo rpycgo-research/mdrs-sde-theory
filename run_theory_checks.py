@@ -7,11 +7,13 @@ geometric ergodicity, Harris recurrence, or breakout-time integrability.
   Check 1 — Invariant ordering: S_t <= R_t
   Check 2 — Drift-dominance parameter sanity check
   Check 3 — Equilibrium-region stability diagnostic
-  Check 4 — Geometric ergodicity rate       (Theorem 3.18)
-  Check 5 — Correlation robustness ρ ≠ 0    (Assumption 3.4)
+  Check 4 — Running-mean stabilization diagnostic
+  Check 5 — Correlation robustness rho != 0
   Check 6 — Implicit scheme dt convergence
-  Check 7 — τ_{r*} finiteness               (Lemma tau_finite)
+  Check 7 — Finite-horizon exit-frequency diagnostic
 """
+from __future__ import annotations
+
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -117,50 +119,41 @@ def check_equilibrium_region_stability() -> bool:
 
 
 # ===================================================================
-# Check 4: Geometric ergodicity rate  (Theorem 3.18)
+# Check 4: Running-mean stabilization diagnostic
 # ===================================================================
-def check_ergodic_rate() -> bool:
-    print("\n=== Check 4: Geometric Ergodicity Convergence Rate ===")
+def check_running_mean_stabilization() -> bool:
+    print("\n=== Check 4: Running-Mean Stabilization Diagnostic ===")
 
     simulator = MDRSSimulator()
-    N = 1_000_000
-    out = simulator.run(num_paths=1, num_steps=N, dt=0.01, seed=42)
+    n_steps = 1_000_000
+    out = simulator.run(num_paths=1, num_steps=n_steps, dt=0.01, seed=42)
     p = out["price"][:, 0]
 
-    # Compute running mean at exponentially-spaced checkpoints
-    checkpoints = np.logspace(3, np.log10(N), 30, dtype=int)
+    checkpoints = np.logspace(3, np.log10(n_steps), 30, dtype=int)
     checkpoints = np.unique(checkpoints)
     running_means = np.array([np.mean(p[:cp]) for cp in checkpoints])
-    final_mean = np.mean(p)
-
-    # Measure |running_mean - final_mean| — should decay
+    final_mean = float(np.mean(p))
     errors = np.abs(running_means - final_mean)
-    errors = np.maximum(errors, 1e-12)  # avoid log(0)
 
-    # Fit log-linear: log(error) = a - b * T  => exponential decay
+    # This is only a stabilization diagnostic, not an ergodicity-rate estimate.
+    early = float(np.median(errors[: max(3, len(errors) // 5)]))
+    late = float(np.median(errors[-max(3, len(errors) // 5) :]))
+    ok = late < early
+
+    print(f"  Median early error: {early:.6e}")
+    print(f"  Median late error : {late:.6e}")
+    print(f"  Result: {PASS if ok else WARN} (diagnostic only)")
+
     T = checkpoints * 0.01
-    mask = errors > 1e-10
-
-    if mask.sum() > 5:
-        coeffs = np.polyfit(T[mask], np.log(errors[mask]), 1)
-        decay_rate = -coeffs[0]
-    else:
-        decay_rate = 0.0
-
-    ok = decay_rate > 0
-    print(f"  Fitted exponential decay rate: {decay_rate:.6f}")
-    print(f"  Result: {PASS if ok else FAIL} (rate > 0 implies exponential convergence)")
-
     plt.figure(figsize=(8, 5))
-    plt.semilogy(T, errors, "o-", ms=3, color="darkblue")
+    plt.semilogy(T, np.maximum(errors, 1e-12), "o-", ms=3, color="darkblue")
     plt.xlabel("Simulation Time T")
-    plt.ylabel(r"$|\bar{p}_T - \bar{p}_\infty|$")
-    plt.title("Ergodic Convergence of Running Mean")
+    plt.ylabel(r"$|\bar{p}_T - \bar{p}_{final}|$")
+    plt.title("Running-Mean Stabilization Diagnostic")
     plt.grid(True, ls="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_DIR, "check4_ergodic_rate.png"), dpi=200)
-    print("  Saved check4_ergodic_rate.png")
-
+    plt.savefig(os.path.join(FIGURE_DIR, "check4_running_mean_stabilization.png"), dpi=200)
+    print("  Saved check4_running_mean_stabilization.png")
     return ok
 
 
@@ -247,36 +240,36 @@ def check_dt_convergence() -> bool:
 
 
 # ===================================================================
-# Check 7: τ_{r*} < ∞ a.s.  (Lemma tau_finite)
+# Check 7: Finite-horizon exit-frequency diagnostic
 # ===================================================================
-def check_tau_finite() -> bool:
-    print("\n=== Check 7: τ_{r*} Finiteness ===")
+def check_finite_horizon_exit_frequency() -> bool:
+    print("\n=== Check 7: Finite-Horizon Exit-Frequency Diagnostic ===")
 
     simulator = MDRSSimulator()
     r_star = 0.1
-    N_paths = 500
-    N_steps = 10000  # T_max = 100
+    n_paths = 500
+    n_steps = 10_000
+    dt = 0.01
 
-    out = simulator.run(num_paths=N_paths, num_steps=N_steps, dt=0.01, seed=42)
+    out = simulator.run(num_paths=n_paths, num_steps=n_steps, dt=dt, seed=42)
     prices = out["price"]
     hit = np.abs(prices) >= r_star
     ever_hit = hit.any(axis=0)
-    frac = ever_hit.mean()
-
-    # For paths that hit, compute mean tau
+    frac = float(ever_hit.mean())
     idx = np.argmax(hit, axis=0)
-    idx[~ever_hit] = N_steps - 1
-    tau = idx * 0.01
+    idx[~ever_hit] = n_steps - 1
+    tau = idx * dt
     tau_hit = tau[ever_hit]
 
     print(f"  Barrier r* = {r_star}")
-    print(f"  Fraction hitting barrier in T={N_steps*0.01:.0f}: {frac:.4f} ({ever_hit.sum()}/{N_paths})")
+    print(f"  Fraction hitting barrier in T={n_steps * dt:.0f}: {frac:.4f} ({ever_hit.sum()}/{n_paths})")
     if len(tau_hit) > 0:
-        print(f"  E[τ | hit] = {tau_hit.mean():.4f}")
-        print(f"  max(τ | hit) = {tau_hit.max():.4f}")
+        print(f"  E[tau | hit] = {tau_hit.mean():.4f}")
+        print(f"  max(tau | hit) = {tau_hit.max():.4f}")
+    print("  Scope: diagnostic only; this is not a proof of almost-sure finiteness.")
 
-    ok = frac > 0.90  # essentially all paths should hit within T_max
-    print(f"  Result: {PASS if ok else FAIL} (expect >90% hitting)")
+    ok = frac > 0.90
+    print(f"  Result: {PASS if ok else WARN} (diagnostic threshold >90% hitting)")
     return ok
 
 
@@ -286,8 +279,10 @@ def main():
         "1_invariant_ordering": check_invariant_ordering(),
         "2_drift_dominance": check_drift_dominance(),
         "3_equilibrium_region_stability": check_equilibrium_region_stability(),
+        "4_running_mean_stabilization": check_running_mean_stabilization(),
         "5_rho_robustness": check_rho_robustness(),
         "6_dt_convergence": check_dt_convergence(),
+        "7_finite_horizon_exit_frequency": check_finite_horizon_exit_frequency(),
     }
 
     print("\n" + "=" * 72)
