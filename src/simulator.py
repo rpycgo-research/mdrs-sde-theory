@@ -175,6 +175,22 @@ class MDRSSimulator:
         gamma_val = gamma_override if gamma_override is not None else self.gamma
         rho_val = rho_override if rho_override is not None else self.rho
 
+
+        if num_paths <= 0:
+            raise ValueError("num_paths must be positive.")
+        if num_steps <= 0:
+            raise ValueError("num_steps must be positive.")
+        if dt <= 0:
+            raise ValueError("dt must be positive.")
+        if not (-1.0 < rho_val < 1.0):
+            raise ValueError("rho must lie in (-1, 1).")
+        if self.sigma_0 <= 0 or self.sigma_1 <= 0 or self.sigma_z <= 0:
+            raise ValueError("sigma_0, sigma_1, and sigma_z must be positive.")
+        if not (0.0 < self.w_max < 1.0):
+            raise ValueError("w_max must lie in (0, 1).")
+        if s0 > r0:
+            raise ValueError("Initial support must not exceed initial resistance: require s0 <= r0.")
+
         dW_p = np.random.standard_normal((num_steps, num_paths))
         dW_ind = np.random.standard_normal((num_steps, num_paths))
 
