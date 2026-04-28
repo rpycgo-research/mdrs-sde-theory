@@ -243,8 +243,7 @@ def experiment_3_long_run_stability(sim: MDRSSimulator, num_steps: int = 2_000_0
     print("  Saved fig3_long_run_distribution.png")
 
 
-# ===================================================================
-if __name__ == "__main__":
+def main():
     sim = MDRSSimulator()
 
     experiment_1_trajectory(sim)
@@ -252,3 +251,8 @@ if __name__ == "__main__":
     experiment_3_long_run_stability(sim, num_steps=2_000_000)
 
     print("\n=== All synthetic reproduction experiments complete. ===")
+
+
+# ===================================================================
+if __name__ == "__main__":
+    main()

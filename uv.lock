@@ -258,7 +258,7 @@ wheels = [
 [[package]]
 name = "mdrs-sde-theory"
 version = "0.3.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "matplotlib" },
     { name = "numba" },
