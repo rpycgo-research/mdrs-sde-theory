@@ -66,13 +66,13 @@ uv run python run_empirical_calibration.py \
   --out-dir results/empirical
 ```
 
-If your BTC file is named `btcusdt_5m(1).csv`, use:
+If your BTC file is named `btcusdt_5m.csv`, use:
 
 ```bash
 uv run python run_empirical_calibration.py \
   --data-dir data \
   --out-dir results/empirical \
-  --assets BTC:btcusdt_5m\(1\).csv ETH:ethusdt_5m.csv XRP:xrpusdt_5m.csv SOL:solusdt_5m.csv
+  --assets BTC:btcusdt_5m.csv ETH:ethusdt_5m.csv XRP:xrpusdt_5m.csv SOL:solusdt_5m.csv
 ```
 
 ## Empirical outputs
