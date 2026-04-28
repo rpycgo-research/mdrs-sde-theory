@@ -6,8 +6,8 @@ Microstructure-Driven Regime-Switching SDE (MDRS-SDE) paper.
 ## Repository structure
 
 - `src/simulator.py` — Numba-accelerated simulator for the four-dimensional leaky-extrema MDRS-SDE.
-- `run_experiments.py` — synthetic figures and tables used for paper reproduction.
-- `run_theory_checks.py` — numerical sanity checks for simulator behavior.
+- `run_synthetic_experiments.py` — synthetic figures and tables used for paper reproduction.
+- `run_simulation_diagnostics.py` — numerical sanity checks for simulator behavior.
 - `src/empirical.py` — real-data empirical calibration utilities.
 - `run_empirical_calibration.py` — BTC/ETH main empirical pipeline with XRP/SOL robustness.
 - `figures/` — generated figures.
