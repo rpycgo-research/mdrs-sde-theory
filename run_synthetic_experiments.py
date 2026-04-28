@@ -1,7 +1,7 @@
 """
 Synthetic reproduction experiments for the MDRS-SDE paper.
 
-  Experiment 1 — Figure 1: 4D trajectory with leaky/latched extrema
+  Experiment 1 — Figure 1: 4D trajectory with leaky extrema
   Experiment 2 — Figure 2: E[τ_r*] sensitivity to γ  (IC-Alpha resolution)
   Experiment 3 — Figure 3 + Tables 1-2: long-run stability and volatility identification
 
@@ -77,7 +77,7 @@ def experiment_1_trajectory(sim: MDRSSimulator) -> None:
     s = out["support"][:, best]
     z = out["signal"][:, best]
     w = out["weight"][:, best]
-    latched = z >= sim.zeta
+    momentum_regime = z >= sim.zeta
 
     fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
 
@@ -98,8 +98,8 @@ def experiment_1_trajectory(sim: MDRSSimulator) -> None:
 
     for idx, ax in enumerate(axes):
         lo, hi = ax.get_ylim()
-        lab = r"Latched Regime ($Z_t \geq \zeta$)" if idx == 0 else ""
-        ax.fill_between(t, lo, hi, where=latched, color="gray", alpha=0.2, label=lab)
+        lab = r"Frozen-extrema regime ($Z_t \geq \zeta$)" if idx == 0 else ""
+        ax.fill_between(t, lo, hi, where=momentum_regime, color="gray", alpha=0.2, label=lab)
         ax.legend(loc="upper left", fontsize=8)
     plt.tight_layout()
     plt.savefig(os.path.join(FIGURE_DIR, "fig1_trajectory.png"), dpi=300)
@@ -195,7 +195,7 @@ def experiment_3_long_run_stability(sim: MDRSSimulator, num_steps: int = 2_000_0
             [kurt_bm, kurt_se],
         ]),
         delimiter=",",
-        header="statistic,batch_means_se",
+        header="estimate,batch_means_se",
         comments="",
     )
 
