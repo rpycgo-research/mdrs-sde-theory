@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from scipy import stats
 
 BAR_MINUTES = 5
 BARS_PER_DAY = 24 * 60 // BAR_MINUTES
@@ -450,6 +451,70 @@ def fit_volatility_prediction(
                 "coef_past_RV": float(result.params[f"rv_past_{horizon}"]),
                 "t_past_RV_HAC": float(result.tvalues[f"rv_past_{horizon}"]),
                 "R2": float(result.rsquared),
+            }
+        )
+
+    return rows
+
+
+def batch_stat_se(
+    x: pd.Series | np.ndarray,
+    stat_fn: Callable[[np.ndarray], float],
+    n_batches: int = 100,
+    ) -> tuple[float, float, int]:
+    """Estimate a statistic and batch-means standard error."""
+    values = np.asarray(pd.Series(x).dropna(), dtype=float)
+
+    if len(values) == 0:
+        return np.nan, np.nan, 0
+
+    n_batches = max(2, min(n_batches, len(values)))
+    batch_size = len(values) // n_batches
+    values = values[: batch_size * n_batches]
+
+    batch_values = []
+    for idx in range(n_batches):
+        chunk = values[idx * batch_size : (idx + 1) * batch_size]
+        batch_values.append(float(stat_fn(chunk)))
+
+    batch_values = np.asarray(batch_values)
+    se = float(batch_values.std(ddof=1) / np.sqrt(n_batches))
+
+    return float(batch_values.mean()), se, int(n_batches)
+
+
+def real_data_moments(
+    df: pd.DataFrame,
+    asset: str,
+    split: str,
+    n_batches: int = 100,
+    ) -> list[dict]:
+    """Compute batch-means moment estimates for real-data returns."""
+    sub = split_sample(df=df, split=split)
+    returns = sub["ret"].dropna()
+
+    stat_functions: dict[str, Callable[[np.ndarray], float]] = {
+        "mean": np.mean,
+        "std": np.std,
+        "skewness": stats.skew,
+        "kurtosis": lambda x: stats.kurtosis(x, fisher=False),
+    }
+
+    rows: list[dict] = []
+    for name, stat_fn in stat_functions.items():
+        value, se, n_batches_used = batch_stat_se(
+            returns,
+            stat_fn,
+            n_batches=n_batches,
+        )
+        rows.append(
+            {
+                "Asset": asset,
+                "Split": split,
+                "Statistic": name,
+                "Value": value,
+                "Batch_SE": se,
+                "Batches": n_batches_used,
             }
         )
 

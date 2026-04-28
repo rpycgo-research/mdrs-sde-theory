@@ -25,6 +25,7 @@ from src.empirical import (
     fit_volatility_prediction,
     load_ohlcv,
     ou_oos_diagnostics,
+    real_data_moments,
     split_sample,
 )
 
@@ -87,6 +88,7 @@ OUTPUT_TABLES = {
     "leaky_extrema_calibration.csv": "leaky_rows",
     "leaky_grid_search.csv": "leaky_grid_rows",
     "volatility_prediction_hac.csv": "vol_rows",
+    "return_moments_batch_means.csv": "moment_rows",
 }
 
 
@@ -99,6 +101,7 @@ def empty_outputs() -> dict[str, list[dict]]:
         "leaky_rows": [],
         "leaky_grid_rows": [],
         "vol_rows": [],
+        "moment_rows": [],
     }
 
 
@@ -137,6 +140,11 @@ def process_asset(
     for split in ["validation", "test", "recent"]:
         outputs["vol_rows"].extend(
             fit_volatility_prediction(df, asset_file.asset, split=split)
+        )
+
+    for split in ["train", "validation", "test", "recent"]:
+        outputs["moment_rows"].extend(
+            real_data_moments(df, asset_file.asset, split=split)
         )
 
 
