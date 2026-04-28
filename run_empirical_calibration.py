@@ -18,6 +18,7 @@ import pandas as pd
 from src.empirical import (
     AssetFile,
     add_microstructure_signal,
+    calibrate_leaky_extrema,
     data_coverage,
     fit_ou_ar1,
     load_ohlcv,
@@ -77,16 +78,33 @@ def parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
+OUTPUT_TABLES = {
+    "data_coverage.csv": "coverage_rows",
+    "ou_calibration.csv": "ou_rows",
+    "ou_oos_diagnostics.csv": "ou_oos_rows",
+    "leaky_extrema_calibration.csv": "leaky_rows",
+    "leaky_grid_search.csv": "leaky_grid_rows",
+}
+
+
+def empty_outputs() -> dict[str, list[dict]]:
+    """Initialize output containers."""
+    return {
+        "coverage_rows": [],
+        "ou_rows": [],
+        "ou_oos_rows": [],
+        "leaky_rows": [],
+        "leaky_grid_rows": [],
+    }
+
 
 def process_asset(
     *,
     asset_file: AssetFile,
     data_dir: Path,
-    coverage_rows: list[dict],
-    ou_rows: list[dict],
-    ou_oos_rows: list[dict],
+    outputs: dict[str, list[dict]],
     ) -> None:
-    """Load one asset and append coverage and OU results."""
+    """Load one asset and append coverage, OU, and leaky-extrema results."""
     path = data_dir / asset_file.filename
     if not path.exists():
         print(f"[skip] {asset_file.asset}: missing file {path}")
@@ -96,63 +114,52 @@ def process_asset(
     df = load_ohlcv(path)
     df = add_microstructure_signal(df)
 
-    coverage_rows.append(data_coverage(df, asset_file.asset))
+    outputs["coverage_rows"].append(data_coverage(df, asset_file.asset))
+
     fit = fit_ou_ar1(split_sample(df, "train")["Z"])
-    ou_rows.append(
-        {
-            "Asset": asset_file.asset,
-            **{
-                key: fit[key]
-                for key in [
-                    "b",
-                    "kappa_per_day",
-                    "half_life_hours",
-                    "zbar",
-                    "sigmaZ_per_sqrt_day",
-                    "r2",
-                    "n",
-                ]
-            },
-        }
-    )
+    outputs["ou_rows"].append({"Asset": asset_file.asset, **fit})
 
     for split in ["train", "validation", "test", "recent"]:
         diagnostics = ou_oos_diagnostics(split_sample(df, split)["Z"], fit)
-        ou_oos_rows.append(
-            {
-                "Asset": asset_file.asset,
-                "Split": split,
-                **diagnostics,
-            }
+        outputs["ou_oos_rows"].append(
+            {"Asset": asset_file.asset, "Split": split, **diagnostics}
         )
+
+    rows, grid = calibrate_leaky_extrema(df, asset_file.asset)
+    outputs["leaky_rows"].extend(rows)
+    outputs["leaky_grid_rows"].extend(grid)
+
+
+def save_outputs(
+    *,
+    outputs: dict[str, list[dict]],
+    out_dir: Path,
+    ) -> None:
+    """Write output tables to CSV."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for filename, key in OUTPUT_TABLES.items():
+        output_path = out_dir / filename
+        rows = outputs[key]
+        pd.DataFrame(rows).to_csv(output_path, index=False)
+        print(f"[save] {output_path} ({len(rows)} rows)")
 
 
 def main():
-    """Run coverage and OU calibration outputs."""
+    """Run the empirical calibration pipeline."""
     args = parse_args()
     data_dir = Path(args.data_dir)
     out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    coverage_rows: list[dict] = []
-    ou_rows: list[dict] = []
-    ou_oos_rows: list[dict] = []
+    outputs = empty_outputs()
 
     for asset_file in parse_asset_files(args.assets):
         process_asset(
             asset_file=asset_file,
             data_dir=data_dir,
-            coverage_rows=coverage_rows,
-            ou_rows=ou_rows,
-            ou_oos_rows=ou_oos_rows,
+            outputs=outputs,
         )
 
-    pd.DataFrame(coverage_rows).to_csv(out_dir / "data_coverage.csv", index=False)
-    pd.DataFrame(ou_rows).to_csv(out_dir / "ou_calibration.csv", index=False)
-    pd.DataFrame(ou_oos_rows).to_csv(
-        out_dir / "ou_oos_diagnostics.csv",
-        index=False,
-    )
+    save_outputs(outputs=outputs, out_dir=out_dir)
 
 
 if __name__ == "__main__":

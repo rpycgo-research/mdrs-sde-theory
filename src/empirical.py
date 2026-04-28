@@ -196,3 +196,191 @@ def ou_oos_diagnostics(z: pd.Series, fit: dict) -> dict:
         "rmse": float(np.sqrt(np.mean((y - pred) ** 2))),
         "corr": float(np.corrcoef(y, pred)[0, 1]) if len(y) > 1 else np.nan,
     }
+
+
+def empirical_latched_extrema(
+    df: pd.DataFrame,
+    zeta: float = DEFAULT_ZETA,
+    window: int = ROLLING_WINDOW,
+    ) -> tuple[pd.Series, pd.Series]:
+    """Construct empirical rolling support/resistance over quiet regimes."""
+    price = df["log_close"]
+    quiet = df["Z"] < zeta
+    price_quiet = price.where(quiet)
+
+    resistance = price_quiet.rolling(window, min_periods=1).max().ffill()
+    support = price_quiet.rolling(window, min_periods=1).min().ffill()
+
+    return resistance, support
+
+
+def simulate_leaky_extrema(
+    df: pd.DataFrame,
+    fast_hl_bars: int,
+    slow_hl_bars: int,
+    zeta: float = DEFAULT_ZETA,
+    ) -> tuple[pd.Series, pd.Series]:
+    """Simulate leaky support/resistance on the observed price path."""
+    price = df["log_close"].to_numpy()
+    signal = df["Z"].to_numpy()
+
+    beta = 1 - np.exp(-np.log(2) / fast_hl_bars)
+    gamma = 1 - np.exp(-np.log(2) / slow_hl_bars)
+
+    resistance = np.full(len(df), np.nan)
+    support = np.full(len(df), np.nan)
+
+    valid = np.where(np.isfinite(price) & np.isfinite(signal))[0]
+    if len(valid) == 0:
+        return pd.Series(resistance, index=df.index), pd.Series(support, index=df.index)
+
+    start_idx = int(valid[0])
+    resistance[start_idx] = price[start_idx]
+    support[start_idx] = price[start_idx]
+
+    for idx in range(start_idx + 1, len(df)):
+        resistance[idx] = resistance[idx - 1]
+        support[idx] = support[idx - 1]
+
+        if not np.isfinite(price[idx]) or not np.isfinite(signal[idx]):
+            continue
+
+        if signal[idx] < zeta:
+            resistance[idx] += beta * max(price[idx] - resistance[idx], 0.0)
+            resistance[idx] -= gamma * max(resistance[idx] - price[idx], 0.0)
+
+            support[idx] -= beta * max(support[idx] - price[idx], 0.0)
+            support[idx] += gamma * max(price[idx] - support[idx], 0.0)
+
+    return pd.Series(resistance, index=df.index), pd.Series(support, index=df.index)
+
+
+def evaluate_leaky_extrema(
+    df: pd.DataFrame,
+    resistance: pd.Series,
+    support: pd.Series,
+    empirical_resistance: pd.Series,
+    empirical_support: pd.Series,
+    split: str,
+    ) -> dict | None:
+    """Evaluate leaky-extrema approximation error on a named split."""
+    tmp_df = df.assign(
+        R=resistance,
+        S=support,
+        Rhat=empirical_resistance,
+        Shat=empirical_support,
+    )
+    tmp = split_sample(df=tmp_df, split=split)
+    tmp = tmp[["R", "S", "Rhat", "Shat"]]
+    tmp = tmp.replace([np.inf, -np.inf], np.nan).dropna()
+
+    if len(tmp) == 0:
+        return None
+
+    err_r = tmp["R"] - tmp["Rhat"]
+    err_s = tmp["S"] - tmp["Shat"]
+
+    return {
+        "N": int(len(tmp)),
+        "MAE_R": float(err_r.abs().mean()),
+        "MAE_S": float(err_s.abs().mean()),
+        "RMSE_R": float(np.sqrt((err_r**2).mean())),
+        "RMSE_S": float(np.sqrt((err_s**2).mean())),
+        "Corr_R": float(tmp["R"].corr(tmp["Rhat"])),
+        "Corr_S": float(tmp["S"].corr(tmp["Shat"])),
+        "Mean_MAE": float((err_r.abs().mean() + err_s.abs().mean()) / 2),
+    }
+
+
+def calibrate_leaky_extrema(
+    df: pd.DataFrame,
+    asset: str,
+    zeta: float = DEFAULT_ZETA,
+    ) -> tuple[list[dict], list[dict]]:
+    """Calibrate leaky-extrema half-lives using validation MAE."""
+    empirical_resistance, empirical_support = empirical_latched_extrema(
+        df=df,
+        zeta=zeta,
+    )
+
+    fast_grid = [1, 3, 6, 12, 24]
+    slow_grid = [72, 144, 288, 576, 1008, 2016]
+
+    best_params: dict | None = None
+    best_score = np.inf
+    grid_rows: list[dict] = []
+
+    for fast_hl in fast_grid:
+        for slow_hl in slow_grid:
+            if slow_hl <= fast_hl:
+                continue
+
+            resistance, support = simulate_leaky_extrema(
+                df=df,
+                fast_hl_bars=fast_hl,
+                slow_hl_bars=slow_hl,
+                zeta=zeta,
+            )
+            train_error = evaluate_leaky_extrema(
+                df=df,
+                resistance=resistance,
+                support=support,
+                empirical_resistance=empirical_resistance,
+                empirical_support=empirical_support,
+                split="train",
+            )
+            validation_error = evaluate_leaky_extrema(
+                df=df,
+                resistance=resistance,
+                support=support,
+                empirical_resistance=empirical_resistance,
+                empirical_support=empirical_support,
+                split="validation",
+            )
+
+            if train_error is None or validation_error is None:
+                continue
+
+            row = {
+                "Asset": asset,
+                "fast_hl_bars": fast_hl,
+                "slow_hl_bars": slow_hl,
+                "fast_hl_hours": fast_hl * BAR_MINUTES / 60,
+                "slow_hl_hours": slow_hl * BAR_MINUTES / 60,
+                "train_Mean_MAE": train_error["Mean_MAE"],
+                "validation_Mean_MAE": validation_error["Mean_MAE"],
+            }
+            grid_rows.append(row)
+
+            score = row["validation_Mean_MAE"]
+            if score < best_score:
+                best_score = score
+                best_params = row
+
+    if best_params is None:
+        raise ValueError(
+            f"No valid leaky-extrema calibration candidate for {asset}. "
+            "Check split dates, Z construction, and rolling-extrema availability."
+        )
+
+    resistance, support = simulate_leaky_extrema(
+        df=df,
+        fast_hl_bars=int(best_params["fast_hl_bars"]),
+        slow_hl_bars=int(best_params["slow_hl_bars"]),
+        zeta=zeta,
+    )
+
+    rows: list[dict] = []
+    for split in ["train", "validation", "test", "recent"]:
+        error = evaluate_leaky_extrema(
+            df=df,
+            resistance=resistance,
+            support=support,
+            empirical_resistance=empirical_resistance,
+            empirical_support=empirical_support,
+            split=split,
+        )
+        if error is not None:
+            rows.append({"Asset": asset, "Split": split, **best_params, **error})
+
+    return rows, grid_rows
