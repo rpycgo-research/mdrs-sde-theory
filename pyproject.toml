@@ -1,7 +1,7 @@
 [project]
 name = "mdrs-sde-theory"
 version = "0.1.0"
-description = "Add your description here"
+description = "Simulation and empirical analysis code for the MDRS-SDE paper"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
