@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -384,3 +385,72 @@ def calibrate_leaky_extrema(
             rows.append({"Asset": asset, "Split": split, **best_params, **error})
 
     return rows, grid_rows
+
+
+def add_realized_variance(
+    df: pd.DataFrame,
+    horizons: Iterable[int] = (12, 48, 144, 288),
+    ) -> pd.DataFrame:
+    """Add past and future realized-variance columns."""
+    df = df.copy()
+    r2 = df["ret"] ** 2
+
+    for horizon in horizons:
+        df[f"rv_past_{horizon}"] = r2.rolling(
+            horizon,
+            min_periods=horizon,
+        ).sum()
+
+        # Sum of squared returns from t+1 through t+horizon.
+        df[f"rv_future_{horizon}"] = (
+            r2.shift(-1)
+            .rolling(horizon, min_periods=horizon)
+            .sum()
+            .shift(-(horizon - 1))
+        )
+
+    return df
+
+
+def fit_volatility_prediction(
+    df: pd.DataFrame,
+    asset: str,
+    split: str,
+    horizons: Iterable[int] = (12, 48, 144, 288),
+    ) -> list[dict]:
+    """Fit future realized-variance regressions with HAC inference."""
+    sub = split_sample(df=df, split=split)
+    rows: list[dict] = []
+
+    for horizon in horizons:
+        columns = ["Z", f"rv_past_{horizon}", f"rv_future_{horizon}"]
+        tmp = sub[columns].replace([np.inf, -np.inf], np.nan).dropna()
+
+        if len(tmp) == 0:
+            continue
+
+        y = tmp[f"rv_future_{horizon}"]
+        X = sm.add_constant(tmp[["Z", f"rv_past_{horizon}"]])
+        model = sm.OLS(y, X, missing="drop")
+        result = model.fit(
+            cov_type="HAC",
+            cov_kwds={"maxlags": min(288, max(1, horizon * 2))},
+        )
+
+        rows.append(
+            {
+                "Asset": asset,
+                "Split": split,
+                "Horizon_bars": horizon,
+                "Horizon": HORIZON_LABELS.get(horizon, f"{horizon} bars"),
+                "N": int(result.nobs),
+                "coef_Z": float(result.params["Z"]),
+                "t_Z_HAC": float(result.tvalues["Z"]),
+                "p_Z_HAC": float(result.pvalues["Z"]),
+                "coef_past_RV": float(result.params[f"rv_past_{horizon}"]),
+                "t_past_RV_HAC": float(result.tvalues[f"rv_past_{horizon}"]),
+                "R2": float(result.rsquared),
+            }
+        )
+
+    return rows

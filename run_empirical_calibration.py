@@ -18,9 +18,11 @@ import pandas as pd
 from src.empirical import (
     AssetFile,
     add_microstructure_signal,
+    add_realized_variance,
     calibrate_leaky_extrema,
     data_coverage,
     fit_ou_ar1,
+    fit_volatility_prediction,
     load_ohlcv,
     ou_oos_diagnostics,
     split_sample,
@@ -84,6 +86,7 @@ OUTPUT_TABLES = {
     "ou_oos_diagnostics.csv": "ou_oos_rows",
     "leaky_extrema_calibration.csv": "leaky_rows",
     "leaky_grid_search.csv": "leaky_grid_rows",
+    "volatility_prediction_hac.csv": "vol_rows",
 }
 
 
@@ -95,6 +98,7 @@ def empty_outputs() -> dict[str, list[dict]]:
         "ou_oos_rows": [],
         "leaky_rows": [],
         "leaky_grid_rows": [],
+        "vol_rows": [],
     }
 
 
@@ -104,7 +108,7 @@ def process_asset(
     data_dir: Path,
     outputs: dict[str, list[dict]],
     ) -> None:
-    """Load one asset and append coverage, OU, and leaky-extrema results."""
+    """Load one asset and append coverage, OU, leaky, and volatility results."""
     path = data_dir / asset_file.filename
     if not path.exists():
         print(f"[skip] {asset_file.asset}: missing file {path}")
@@ -113,6 +117,7 @@ def process_asset(
     print(f"[load] {asset_file.asset}: {path}")
     df = load_ohlcv(path)
     df = add_microstructure_signal(df)
+    df = add_realized_variance(df)
 
     outputs["coverage_rows"].append(data_coverage(df, asset_file.asset))
 
@@ -128,6 +133,11 @@ def process_asset(
     rows, grid = calibrate_leaky_extrema(df, asset_file.asset)
     outputs["leaky_rows"].extend(rows)
     outputs["leaky_grid_rows"].extend(grid)
+
+    for split in ["validation", "test", "recent"]:
+        outputs["vol_rows"].extend(
+            fit_volatility_prediction(df, asset_file.asset, split=split)
+        )
 
 
 def save_outputs(
