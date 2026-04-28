@@ -1,9 +1,15 @@
 """
-Implements the three main experiments from Section 4 of the paper.
+Synthetic reproduction experiments for the MDRS-SDE paper.
 
   Experiment 1 — Figure 1: 4D trajectory with leaky/latched extrema
   Experiment 2 — Figure 2: E[τ_r*] sensitivity to γ  (IC-Alpha resolution)
   Experiment 3 — Figure 3 + Tables 1-2: long-run stability and volatility identification
+
+Scope note
+----------
+These experiments provide numerical illustrations and stability evidence. They do
+not constitute a proof of total-variation geometric ergodicity or breakout-time
+integrability.
 """
 import os
 from typing import Callable, Tuple
@@ -242,4 +248,4 @@ if __name__ == "__main__":
     experiment_2_sensitivity(sim)
     experiment_3_long_run_stability(sim, num_steps=2_000_000)
 
-    print("\n=== All paper reproduction experiments complete. ===")
+    print("\n=== All synthetic reproduction experiments complete. ===")
