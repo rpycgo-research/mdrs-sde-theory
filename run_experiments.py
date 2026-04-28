@@ -6,6 +6,8 @@ Implements the three main experiments from Section 4 of the paper.
   Experiment 3 — Figure 3 + Tables 1-2: long-run stability and volatility identification
 """
 import os
+from typing import Callable, Tuple
+
 import numpy as np
 import scipy.stats as stats
 import matplotlib.pyplot as plt
@@ -13,7 +15,35 @@ import matplotlib.pyplot as plt
 from src.simulator import MDRSSimulator
 
 FIGURE_DIR = "figures"
+TABLE_DIR = "tables"
 os.makedirs(FIGURE_DIR, exist_ok=True)
+os.makedirs(TABLE_DIR, exist_ok=True)
+
+
+def batch_stat_se(x: np.ndarray, stat_fn: Callable[[np.ndarray], float], n_batches: int = 100) -> Tuple[float, float, int]:
+    """Estimate a statistic and its SE using contiguous batch means.
+
+    This is used instead of iid t-statistics because the simulated path is a
+    serially dependent Markov trajectory. It also works for nonlinear statistics
+    such as skewness and kurtosis.
+    """
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+
+    if len(x) == 0:
+        return np.nan, np.nan, 0
+
+    n_batches = max(2, min(n_batches, len(x)))
+    batch_size = len(x) // n_batches
+    trimmed = x[: batch_size * n_batches]
+
+    vals = []
+    for k in range(n_batches):
+        chunk = trimmed[k * batch_size : (k + 1) * batch_size]
+        vals.append(float(stat_fn(chunk)))
+    vals = np.asarray(vals)
+
+    return float(vals.mean()), float(vals.std(ddof=1) / np.sqrt(n_batches)), int(n_batches)
 
 
 # ===================================================================
@@ -117,40 +147,64 @@ def experiment_3_long_run_stability(sim: MDRSSimulator, num_steps: int = 2_000_0
     p = out["price"][:, 0]
     z = out["signal"][:, 0]
 
-    # --- Table 1: Moments ---
-    n = len(p)
-    mu, sd = p.mean(), p.std()
-    sk = stats.skew(p)
-    ku = stats.kurtosis(p, fisher=False)
-    t_mu = mu / (sd / np.sqrt(n))
-    t_sk = sk / np.sqrt(6.0 / n)
+    # --- Table 1: Batch-means moments ---
+    mean_bm, mean_se, k_batches = batch_stat_se(p, np.mean)
+    std_bm, std_se, _ = batch_stat_se(p, np.std)
+    skew_bm, skew_se, _ = batch_stat_se(p, stats.skew)
+    kurt_bm, kurt_se, _ = batch_stat_se(p, lambda x: stats.kurtosis(x, fisher=False))
 
-    print("\n  [Table 1] Empirical Moments")
-    print(f"  Mean      : {mu:.6f}  (t = {t_mu:.2f})")
-    print(f"  Std. Dev. : {sd:.6f}")
-    print(f"  Skewness  : {sk:.6f}  (t = {t_sk:.2f})")
-    print(f"  Kurtosis  : {ku:.4f}")
+    print("\n  [Table 1] Long-Run Moments with Batch-Means SE")
+    print(f"  Batches   : {k_batches}")
+    print(f"  Mean      : {mean_bm:.6f}  (BM SE = {mean_se:.6f})")
+    print(f"  Std. Dev. : {std_bm:.6f}  (BM SE = {std_se:.6f})")
+    print(f"  Skewness  : {skew_bm:.6f}  (BM SE = {skew_se:.6f})")
+    print(f"  Kurtosis  : {kurt_bm:.4f}  (BM SE = {kurt_se:.4f})")
+
+    np.savetxt(
+        os.path.join(TABLE_DIR, "table_long_run_moments_batch_means.csv"),
+        np.array([
+            [mean_bm, mean_se],
+            [std_bm, std_se],
+            [skew_bm, skew_se],
+            [kurt_bm, kurt_se],
+        ]),
+        delimiter=",",
+        header="statistic,batch_means_se",
+        comments="",
+    )
 
     # --- Table 2: Threshold-moving volatility ---
     dp = np.diff(p)
     z_lag = z[:-1]
 
     print("\n  [Table 2] Threshold-Moving Volatility Recovery")
-    print(f"  {'Threshold':<15} {'σ_hat':<12} {'|σ_hat - σ_1|':<15} {'|σ_hat - σ_1_eff|'}")
+    print(f"  {'Threshold':<15} {'N':<10} {'sigma_hat':<12} {'|sigma_hat-sigma_1|':<20} {'|sigma_hat-sigma_1_eff|'}")
     sigma_1_eff = (1 - sim.w_max) * sim.sigma_0 + sim.w_max * sim.sigma_1
+    vol_rows = []
     for thr in [1.0, 1.25, 1.5, 1.75, 2.0]:
         mask = z_lag >= thr
-        if mask.sum() > 0:
-            rv = np.sum(dp[mask] ** 2) / (mask.sum() * 0.01)
+        n_mask = int(mask.sum())
+        if n_mask > 0:
+            rv = np.sum(dp[mask] ** 2) / (n_mask * 0.01)
             sv = np.sqrt(rv)
-            print(f"  Z≥{thr:<12.2f} {sv:<12.4f} {abs(sv - sim.sigma_1):<15.4f} {abs(sv - sigma_1_eff):.4f}")
+            vol_rows.append([thr, n_mask, sv, abs(sv - sim.sigma_1), abs(sv - sigma_1_eff)])
+            print(f"  Z>={thr:<12.2f} {n_mask:<10d} {sv:<12.4f} {abs(sv - sim.sigma_1):<20.4f} {abs(sv - sigma_1_eff):.4f}")
+
+    if vol_rows:
+        np.savetxt(
+            os.path.join(TABLE_DIR, "table_threshold_volatility.csv"),
+            np.asarray(vol_rows),
+            delimiter=",",
+            header="threshold,n_obs,sigma_hat,abs_error_sigma1,abs_error_sigma1_eff",
+            comments="",
+        )
 
     # --- Figure 3: Log-density histogram ---
     plt.figure(figsize=(10, 6))
     plt.hist(p, bins=200, density=True, alpha=0.7, color="steelblue", edgecolor="black")
     plt.axvline(0, color="red", ls="--", lw=2, label="Fundamental Equilibrium (p=0)")
     plt.yscale("log")
-    plt.title(f"Empirical Stationary Distribution (T = {num_steps * 0.01:,.0f})")
+    plt.title(f"Long-Run Distribution (T = {num_steps * 0.01:,.0f})")
     plt.xlabel(r"Price Level $p_t$")
     plt.ylabel(r"Log-Density")
     plt.legend()
