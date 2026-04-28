@@ -5,9 +5,10 @@ Expected CSV columns
 --------------------
 Datetime, Open, High, Low, Close, Volume
 
-Default asset filenames assume the files are located under the repository's
-root-level data/ directory.
+Default asset filenames match the 5-minute perpetual futures files used in the
+paper experiments.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,6 +36,16 @@ DEFAULT_FILES = [
     AssetFile("XRP", "xrpusdt_5m.csv"),
     AssetFile("SOL", "solusdt_5m.csv"),
 ]
+
+OUTPUT_TABLES = {
+    "data_coverage.csv": "coverage_rows",
+    "ou_calibration.csv": "ou_rows",
+    "ou_oos_diagnostics.csv": "ou_oos_rows",
+    "leaky_extrema_calibration.csv": "leaky_rows",
+    "leaky_grid_search.csv": "leaky_grid_rows",
+    "volatility_prediction_hac.csv": "vol_rows",
+    "return_moments_batch_means.csv": "moment_rows",
+}
 
 
 def parse_asset_files(items: list[str] | None) -> list[AssetFile]:
@@ -81,19 +92,9 @@ def parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
-OUTPUT_TABLES = {
-    "data_coverage.csv": "coverage_rows",
-    "ou_calibration.csv": "ou_rows",
-    "ou_oos_diagnostics.csv": "ou_oos_rows",
-    "leaky_extrema_calibration.csv": "leaky_rows",
-    "leaky_grid_search.csv": "leaky_grid_rows",
-    "volatility_prediction_hac.csv": "vol_rows",
-    "return_moments_batch_means.csv": "moment_rows",
-}
-
 
 def empty_outputs() -> dict[str, list[dict]]:
-    """Initialize output containers."""
+    """Initialize the output table containers."""
     return {
         "coverage_rows": [],
         "ou_rows": [],
@@ -111,7 +112,7 @@ def process_asset(
     data_dir: Path,
     outputs: dict[str, list[dict]],
     ) -> None:
-    """Load one asset and append coverage, OU, leaky, and volatility results."""
+    """Load one asset and append its empirical results to output containers."""
     path = data_dir / asset_file.filename
     if not path.exists():
         print(f"[skip] {asset_file.asset}: missing file {path}")
@@ -124,28 +125,99 @@ def process_asset(
 
     outputs["coverage_rows"].append(data_coverage(df, asset_file.asset))
 
+    append_ou_results(
+        df=df,
+        asset=asset_file.asset,
+        outputs=outputs,
+    )
+    append_leaky_extrema_results(
+        df=df,
+        asset=asset_file.asset,
+        outputs=outputs,
+    )
+    append_volatility_prediction_results(
+        df=df,
+        asset=asset_file.asset,
+        outputs=outputs,
+    )
+    append_moment_results(
+        df=df,
+        asset=asset_file.asset,
+        outputs=outputs,
+    )
+
+
+def append_ou_results(
+    *,
+    df: pd.DataFrame,
+    asset: str,
+    outputs: dict[str, list[dict]],
+    ) -> None:
+    """Fit AR(1)-to-OU parameters and append OOS diagnostics."""
     fit = fit_ou_ar1(split_sample(df, "train")["Z"])
-    outputs["ou_rows"].append({"Asset": asset_file.asset, **fit})
+    outputs["ou_rows"].append(
+        {
+            "Asset": asset,
+            **{
+                key: fit[key]
+                for key in [
+                    "b",
+                    "kappa_per_day",
+                    "half_life_hours",
+                    "zbar",
+                    "sigmaZ_per_sqrt_day",
+                    "r2",
+                    "n",
+                ]
+            },
+        }
+    )
 
     for split in ["train", "validation", "test", "recent"]:
         diagnostics = ou_oos_diagnostics(split_sample(df, split)["Z"], fit)
         outputs["ou_oos_rows"].append(
-            {"Asset": asset_file.asset, "Split": split, **diagnostics}
+            {
+                "Asset": asset,
+                "Split": split,
+                **diagnostics,
+            }
         )
 
-    rows, grid = calibrate_leaky_extrema(df, asset_file.asset)
+
+def append_leaky_extrema_results(
+    *,
+    df: pd.DataFrame,
+    asset: str,
+    outputs: dict[str, list[dict]],
+    ) -> None:
+    """Calibrate and append leaky-extrema approximation results."""
+    rows, grid = calibrate_leaky_extrema(df, asset)
     outputs["leaky_rows"].extend(rows)
     outputs["leaky_grid_rows"].extend(grid)
 
-    for split in ["validation", "test", "recent"]:
-        outputs["vol_rows"].extend(
-            fit_volatility_prediction(df, asset_file.asset, split=split)
-        )
 
+def append_volatility_prediction_results(
+    *,
+    df: pd.DataFrame,
+    asset: str,
+    outputs: dict[str, list[dict]],
+    ) -> None:
+    """Append HAC volatility-prediction regression results."""
+    for split in ["validation", "test", "recent"]:
+        rows = fit_volatility_prediction(df, asset, split=split)
+        outputs["vol_rows"].extend(rows)
+
+
+def append_moment_results(
+    *,
+    df: pd.DataFrame,
+    asset: str,
+    outputs: dict[str, list[dict]],
+) -> None:
+    """Append batch-means return-moment diagnostics."""
     for split in ["train", "validation", "test", "recent"]:
-        outputs["moment_rows"].extend(
-            real_data_moments(df, asset_file.asset, split=split)
-        )
+        rows = real_data_moments(df, asset, split=split)
+        outputs["moment_rows"].extend(rows)
 
 
 def save_outputs(
@@ -153,24 +225,67 @@ def save_outputs(
     outputs: dict[str, list[dict]],
     out_dir: Path,
     ) -> None:
-    """Write output tables to CSV."""
+    """Write all output tables to CSV."""
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for filename, key in OUTPUT_TABLES.items():
-        output_path = out_dir / filename
         rows = outputs[key]
+        output_path = out_dir / filename
         pd.DataFrame(rows).to_csv(output_path, index=False)
         print(f"[save] {output_path} ({len(rows)} rows)")
 
 
-def main():
-    """Run the empirical calibration pipeline."""
+def print_compact_summary(outputs: dict[str, list[dict]]) -> None:
+    """Print compact BTC/ETH summaries for quick inspection."""
+    if outputs["ou_rows"]:
+        ou = pd.DataFrame(outputs["ou_rows"])
+        print("\nOU calibration summary:")
+        print(ou.query("Asset in ['BTC', 'ETH']").to_string(index=False))
+
+    if outputs["leaky_rows"]:
+        leaky = pd.DataFrame(outputs["leaky_rows"])
+        columns = [
+            "Asset",
+            "Split",
+            "fast_hl_hours",
+            "slow_hl_hours",
+            "Mean_MAE",
+            "Corr_R",
+            "Corr_S",
+        ]
+        print("\nLeaky-extrema test summary:")
+        print(
+            leaky.query("Asset in ['BTC', 'ETH'] and Split == 'test'")[columns]
+            .to_string(index=False)
+        )
+
+    if outputs["vol_rows"]:
+        vol = pd.DataFrame(outputs["vol_rows"])
+        columns = [
+            "Asset",
+            "Split",
+            "Horizon",
+            "coef_Z",
+            "t_Z_HAC",
+            "p_Z_HAC",
+            "R2",
+        ]
+        print("\nVolatility-prediction test summary:")
+        print(
+            vol.query("Asset in ['BTC', 'ETH'] and Split == 'test'")[columns]
+            .to_string(index=False)
+        )
+
+
+def main() -> None:
+    """Run the full empirical calibration pipeline."""
     args = parse_args()
     data_dir = Path(args.data_dir)
     out_dir = Path(args.out_dir)
+    asset_files = parse_asset_files(args.assets)
     outputs = empty_outputs()
 
-    for asset_file in parse_asset_files(args.assets):
+    for asset_file in asset_files:
         process_asset(
             asset_file=asset_file,
             data_dir=data_dir,
@@ -178,6 +293,7 @@ def main():
         )
 
     save_outputs(outputs=outputs, out_dir=out_dir)
+    print_compact_summary(outputs)
 
 
 if __name__ == "__main__":
