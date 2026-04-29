@@ -207,7 +207,7 @@ def check_rho_robustness() -> bool:
 # Check 6: dt convergence of implicit scheme
 # ===================================================================
 def check_dt_convergence() -> bool:
-    print("\n=== Check 6: dt Convergence Diagnostic (Implicit Scheme) ===")
+    print("\n=== Check 6: Time-Step Sensitivity Diagnostic (Implicit Scheme) ===")
     print("  Using time-average E_T[p^2] as a time-step sensitivity diagnostic")
 
     dts = [0.05, 0.02, 0.01, 0.005]

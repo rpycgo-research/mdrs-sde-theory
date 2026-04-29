@@ -269,7 +269,7 @@ results/empirical/ou_acf_summary.csv
 results/empirical/leaky_extrema_calibration.csv
 results/empirical/leaky_grid_search.csv
 results/empirical/volatility_prediction_hac.csv
-results/empirical/return_moments_batch_means.csv
+results/empirical/return_moments_robust_se.csv
 ```
 
 ---
@@ -534,7 +534,7 @@ results/empirical/ou_acf_diagnostics.csv
 results/empirical/ou_acf_summary.csv
 results/empirical/leaky_extrema_calibration.csv
 results/empirical/volatility_prediction_hac.csv
-results/empirical/return_moments_batch_means.csv
+results/empirical/return_moments_robust_se.csv
 ```
 
 ---

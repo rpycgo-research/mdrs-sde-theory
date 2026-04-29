@@ -50,7 +50,7 @@ OUTPUT_TABLES = {
     "leaky_extrema_calibration.csv": "leaky_rows",
     "leaky_grid_search.csv": "leaky_grid_rows",
     "volatility_prediction_hac.csv": "vol_rows",
-    "return_moments_batch_means.csv": "moment_rows",
+    "return_moments_robust_se.csv": "moment_rows",
 }
 
 

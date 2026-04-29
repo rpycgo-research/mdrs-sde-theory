@@ -204,7 +204,7 @@ def experiment_3_long_run_stability(sim: MDRSSimulator, num_steps: int = 2_000_0
     dp = np.diff(p)
     z_lag = z[:-1]
 
-    print("\n  [Table 2] Threshold-Moving Volatility Recovery")
+    print("\n  [Table 2] Regime-Conditional Volatility Separation")
     print(f"  {'Threshold':<15} {'N':<10} {'sigma_hat':<12} {'|sigma_hat-sigma_1|':<20} {'|sigma_hat-sigma_1_eff|'}")
     sigma_1_eff = (1 - sim.w_max) * sim.sigma_0 + sim.w_max * sim.sigma_1
     vol_rows = []
