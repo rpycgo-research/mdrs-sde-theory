@@ -483,15 +483,90 @@ def batch_stat_se(
     return float(batch_values.mean()), se, int(n_batches)
 
 
+def calendar_block_bootstrap_se(
+    df: pd.DataFrame,
+    value_col: str,
+    stat_fn: Callable[[np.ndarray], float],
+    *,
+    block_freq: str = "1D",
+    n_boot: int = 500,
+    seed: int = 42,
+) -> dict:
+    """Estimate a statistic SE using calendar-block bootstrap.
+
+    The bootstrap resamples whole calendar blocks, such as days or weeks,
+    preserving within-block intraday dependence and seasonality.
+    """
+    if "Datetime" not in df.columns:
+        raise ValueError("calendar_block_bootstrap_se requires a Datetime column.")
+
+    if value_col not in df.columns:
+        raise ValueError(f"calendar_block_bootstrap_se requires {value_col}.")
+
+    tmp = df[["Datetime", value_col]].copy()
+    tmp["Datetime"] = pd.to_datetime(tmp["Datetime"], errors="coerce")
+    tmp[value_col] = pd.to_numeric(tmp[value_col], errors="coerce")
+    tmp = tmp.replace([np.inf, -np.inf], np.nan).dropna()
+
+    if tmp.empty:
+        return {
+            "estimate": np.nan,
+            "bootstrap_mean": np.nan,
+            "bootstrap_se": np.nan,
+            "n_boot": int(n_boot),
+            "n_blocks": 0,
+        }
+
+    tmp = tmp.sort_values("Datetime")
+    blocks = [
+        block[value_col].to_numpy(dtype=float)
+        for _, block in tmp.groupby(pd.Grouper(key="Datetime", freq=block_freq))
+        if len(block) > 0
+    ]
+
+    if not blocks:
+        return {
+            "estimate": np.nan,
+            "bootstrap_mean": np.nan,
+            "bootstrap_se": np.nan,
+            "n_boot": int(n_boot),
+            "n_blocks": 0,
+        }
+
+    rng = np.random.default_rng(seed)
+    n_blocks = len(blocks)
+    values = np.concatenate(blocks)
+    estimate = float(stat_fn(values))
+
+    boot_stats = np.empty(n_boot, dtype=float)
+    for boot_idx in range(n_boot):
+        chosen = rng.integers(0, n_blocks, size=n_blocks)
+        sample = np.concatenate([blocks[idx] for idx in chosen])
+        boot_stats[boot_idx] = float(stat_fn(sample))
+
+    return {
+        "estimate": estimate,
+        "bootstrap_mean": float(np.mean(boot_stats)),
+        "bootstrap_se": float(np.std(boot_stats, ddof=1)),
+        "n_boot": int(n_boot),
+        "n_blocks": int(n_blocks),
+    }
+
 def real_data_moments(
     df: pd.DataFrame,
     asset: str,
     split: str,
     n_batches: int = 100,
-    ) -> list[dict]:
-    """Compute batch-means moment estimates for real-data returns."""
+    n_boot: int = 500,
+) -> list[dict]:
+    """Compute robust moment estimates for real-data returns.
+
+    Daily calendar-block bootstrap SE is the main real-data uncertainty
+    estimate. Weekly calendar-block bootstrap and batch-means SE are reported
+    as robustness checks.
+    """
     sub = split_sample(df=df, split=split)
-    returns = sub["ret"].dropna()
+    returns = sub["ret"].replace([np.inf, -np.inf], np.nan).dropna()
 
     stat_functions: dict[str, Callable[[np.ndarray], float]] = {
         "mean": np.mean,
@@ -502,10 +577,28 @@ def real_data_moments(
 
     rows: list[dict] = []
     for name, stat_fn in stat_functions.items():
-        value, se, n_batches_used = batch_stat_se(
+        values = returns.to_numpy(dtype=float)
+        value = float(stat_fn(values)) if len(values) else np.nan
+        _, batch_se, n_batches_used = batch_stat_se(
             returns,
             stat_fn,
             n_batches=n_batches,
+        )
+        daily = calendar_block_bootstrap_se(
+            sub,
+            "ret",
+            stat_fn,
+            block_freq="1D",
+            n_boot=n_boot,
+            seed=42,
+        )
+        weekly = calendar_block_bootstrap_se(
+            sub,
+            "ret",
+            stat_fn,
+            block_freq="7D",
+            n_boot=n_boot,
+            seed=43,
         )
         rows.append(
             {
@@ -513,8 +606,13 @@ def real_data_moments(
                 "Split": split,
                 "Statistic": name,
                 "Value": value,
-                "Batch_SE": se,
+                "DailyBlockBootstrap_SE": daily["bootstrap_se"],
+                "DailyBlockBootstrap_Blocks": daily["n_blocks"],
+                "WeeklyBlockBootstrap_SE": weekly["bootstrap_se"],
+                "WeeklyBlockBootstrap_Blocks": weekly["n_blocks"],
+                "Batch_SE": batch_se,
                 "Batches": n_batches_used,
+                "Bootstrap_Replications": n_boot,
             }
         )
 
