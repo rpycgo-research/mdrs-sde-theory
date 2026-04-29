@@ -264,10 +264,12 @@ Generated empirical outputs:
 results/empirical/data_coverage.csv
 results/empirical/ou_calibration.csv
 results/empirical/ou_oos_diagnostics.csv
+results/empirical/ou_acf_diagnostics.csv
+results/empirical/ou_acf_summary.csv
 results/empirical/leaky_extrema_calibration.csv
 results/empirical/leaky_grid_search.csv
 results/empirical/volatility_prediction_hac.csv
-results/empirical/return_moments_batch_means.csv
+results/empirical/return_moments_robust_se.csv
 ```
 
 ---
@@ -370,6 +372,31 @@ This avoids iid standard errors for high-frequency crypto time series.
 
 ---
 
+
+
+### OU Time Units
+
+Empirical OU parameters are reported in calendar-day units because the data are sampled at 5-minute frequency. The synthetic MDRS-SDE experiments use normalized model time, so synthetic parameters such as `kappa_Z` should not be interpreted as numerically identical to the empirical calendar-time estimates.
+
+### OU Autocorrelation Diagnostics
+
+In addition to one-step AR(1)-to-OU transition diagnostics, the empirical pipeline reports multi-lag ACF diagnostics. The fitted AR(1) slope `b` implies an OU-style autocorrelation curve `b^lag`; the pipeline compares this curve with the empirical ACF of the signal on train, validation, test, and recent splits.
+
+Generated files:
+
+```text
+results/empirical/ou_acf_diagnostics.csv
+results/empirical/ou_acf_summary.csv
+```
+
+### Calendar-Block Bootstrap Inference
+
+For real-data return moments, the pipeline reports daily and weekly calendar-block bootstrap standard errors in addition to batch-means standard errors. Daily block bootstrap is the main real-data moment uncertainty estimate, while weekly block bootstrap and batch means are robustness checks.
+
+Synthetic simulation moments continue to use batch-means standard errors because synthetic model time has no calendar-day structure.
+
+---
+
 ## Interpreting the Results
 
 Recommended interpretation:
@@ -385,7 +412,7 @@ Volatility prediction:
 The microstructure signal has positive incremental predictive content for future realized variance, especially for BTC and ETH.
 
 Return moments:
-Batch-means inference should be used for serially dependent moments. Unconditional skewness should not be overstated unless robust uncertainty supports it.
+Daily calendar-block bootstrap should be used as the main real-data uncertainty estimate for moments; weekly block bootstrap and batch means are robustness checks. Unconditional skewness should not be overstated unless robust uncertainty supports it.
 ```
 
 Do not claim:
@@ -503,9 +530,11 @@ Empirical outputs:
 ```text
 results/empirical/ou_calibration.csv
 results/empirical/ou_oos_diagnostics.csv
+results/empirical/ou_acf_diagnostics.csv
+results/empirical/ou_acf_summary.csv
 results/empirical/leaky_extrema_calibration.csv
 results/empirical/volatility_prediction_hac.csv
-results/empirical/return_moments_batch_means.csv
+results/empirical/return_moments_robust_se.csv
 ```
 
 ---
