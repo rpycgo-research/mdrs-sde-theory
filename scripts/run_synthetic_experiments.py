@@ -1,7 +1,7 @@
 """
 Synthetic reproduction experiments for the MDRS-SDE paper.
 
-  Experiment 1 — Figure 1: 4D trajectory with leaky/latched extrema
+  Experiment 1 — Figure 1: 4D trajectory with leaky extrema
   Experiment 2 — Figure 2: E[τ_r*] sensitivity to γ  (IC-Alpha resolution)
   Experiment 3 — Figure 3 + Tables 1-2: long-run stability and volatility identification
 
@@ -11,7 +11,7 @@ These experiments provide numerical illustrations and stability evidence. They d
 not constitute a proof of total-variation geometric ergodicity or breakout-time
 integrability.
 """
-import os
+from pathlib import Path
 from typing import Callable, Tuple
 
 import numpy as np
@@ -20,10 +20,13 @@ import matplotlib.pyplot as plt
 
 from src.simulator import MDRSSimulator
 
-FIGURE_DIR = "figures"
-TABLE_DIR = "tables"
-os.makedirs(FIGURE_DIR, exist_ok=True)
-os.makedirs(TABLE_DIR, exist_ok=True)
+RESULTS_DIR = Path("results")
+SYNTHETIC_DIR = RESULTS_DIR / "synthetic"
+FIGURE_DIR = SYNTHETIC_DIR / "figures"
+TABLE_DIR = SYNTHETIC_DIR / "tables"
+
+FIGURE_DIR.mkdir(parents=True, exist_ok=True)
+TABLE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def batch_stat_se(x: np.ndarray, stat_fn: Callable[[np.ndarray], float], n_batches: int = 100) -> Tuple[float, float, int]:
@@ -77,7 +80,7 @@ def experiment_1_trajectory(sim: MDRSSimulator) -> None:
     s = out["support"][:, best]
     z = out["signal"][:, best]
     w = out["weight"][:, best]
-    latched = z >= sim.zeta
+    momentum_regime = z >= sim.zeta
 
     fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
 
@@ -98,11 +101,11 @@ def experiment_1_trajectory(sim: MDRSSimulator) -> None:
 
     for idx, ax in enumerate(axes):
         lo, hi = ax.get_ylim()
-        lab = r"Latched Regime ($Z_t \geq \zeta$)" if idx == 0 else ""
-        ax.fill_between(t, lo, hi, where=latched, color="gray", alpha=0.2, label=lab)
+        lab = r"Frozen-extrema regime ($Z_t \geq \zeta$)" if idx == 0 else ""
+        ax.fill_between(t, lo, hi, where=momentum_regime, color="gray", alpha=0.2, label=lab)
         ax.legend(loc="upper left", fontsize=8)
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_DIR, "fig1_trajectory.png"), dpi=300)
+    plt.savefig(FIGURE_DIR / "fig1_trajectory.png")
     print("  Saved fig1_trajectory.png")
 
 
@@ -151,11 +154,11 @@ def experiment_2_sensitivity(sim: MDRSSimulator, num_paths: int = 2000) -> None:
     plt.grid(True, ls="--", alpha=0.7)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_DIR, "fig2_sensitivity.png"), dpi=300)
+    plt.savefig(FIGURE_DIR / "fig2_sensitivity.png")
     print("  Saved fig2_sensitivity.png")
 
     np.savetxt(
-        os.path.join(TABLE_DIR, "table_breakout_sensitivity.csv"),
+        TABLE_DIR / "table_breakout_sensitivity.csv",
         np.column_stack([gammas, means, ses, censor_rates]),
         delimiter=",",
         header="gamma,finite_horizon_mean_tau,se,censor_rate",
@@ -187,7 +190,7 @@ def experiment_3_long_run_stability(sim: MDRSSimulator, num_steps: int = 2_000_0
     print(f"  Kurtosis  : {kurt_bm:.4f}  (BM SE = {kurt_se:.4f})")
 
     np.savetxt(
-        os.path.join(TABLE_DIR, "table_long_run_moments_batch_means.csv"),
+        TABLE_DIR / "table_long_run_moments_batch_means.csv",
         np.array([
             [mean_bm, mean_se],
             [std_bm, std_se],
@@ -195,7 +198,7 @@ def experiment_3_long_run_stability(sim: MDRSSimulator, num_steps: int = 2_000_0
             [kurt_bm, kurt_se],
         ]),
         delimiter=",",
-        header="statistic,batch_means_se",
+        header="estimate,batch_means_se",
         comments="",
     )
 
@@ -218,7 +221,7 @@ def experiment_3_long_run_stability(sim: MDRSSimulator, num_steps: int = 2_000_0
 
     if vol_rows:
         np.savetxt(
-            os.path.join(TABLE_DIR, "table_threshold_volatility.csv"),
+            TABLE_DIR / "table_threshold_volatility.csv",
             np.asarray(vol_rows),
             delimiter=",",
             header="threshold,n_obs,sigma_hat,abs_error_sigma1,abs_error_sigma1_eff",
@@ -236,12 +239,11 @@ def experiment_3_long_run_stability(sim: MDRSSimulator, num_steps: int = 2_000_0
     plt.legend()
     plt.grid(True, ls="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_DIR, "fig3_long_run_distribution.png"), dpi=300)
+    plt.savefig(FIGURE_DIR / "fig3_long_run_distribution.png")
     print("  Saved fig3_long_run_distribution.png")
 
 
-# ===================================================================
-if __name__ == "__main__":
+def main():
     sim = MDRSSimulator()
 
     experiment_1_trajectory(sim)
@@ -249,3 +251,8 @@ if __name__ == "__main__":
     experiment_3_long_run_stability(sim, num_steps=2_000_000)
 
     print("\n=== All synthetic reproduction experiments complete. ===")
+
+
+# ===================================================================
+if __name__ == "__main__":
+    main()
