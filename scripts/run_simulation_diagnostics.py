@@ -14,14 +14,17 @@ geometric ergodicity, Harris recurrence, or breakout-time integrability.
 """
 from __future__ import annotations
 
-import os
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
 from src.simulator import MDRSSimulator, DEFAULT_PARAMS
 
-FIGURE_DIR = "figures"
-os.makedirs(FIGURE_DIR, exist_ok=True)
+RESULTS_DIR = Path("results")
+DIAGNOSTICS_DIR = RESULTS_DIR / "diagnostics"
+FIGURE_DIR = DIAGNOSTICS_DIR / "figures"
+
+FIGURE_DIR.mkdir(parents=True, exist_ok=True)
 
 PASS = "\033[92mPASS\033[0m"
 WARN = "\033[93mWARN\033[0m"
@@ -113,7 +116,7 @@ def check_equilibrium_region_stability() -> bool:
     plt.title("Equilibrium-Region Stability Diagnostic")
     plt.grid(True, ls="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_DIR, "check3_stability_diagnostic.png"), dpi=200)
+    plt.savefig(FIGURE_DIR / "check3_stability_diagnostic.png")
     print("  Saved check3_stability_diagnostic.png")
     return ok
 
@@ -152,7 +155,7 @@ def check_running_mean_stabilization() -> bool:
     plt.title("Running-Mean Stabilization Diagnostic")
     plt.grid(True, ls="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_DIR, "check4_running_mean_stabilization.png"), dpi=200)
+    plt.savefig(FIGURE_DIR / "check4_running_mean_stabilization.png")
     print("  Saved check4_running_mean_stabilization.png")
     return ok
 
@@ -201,7 +204,7 @@ def check_rho_robustness() -> bool:
 # ===================================================================
 def check_dt_convergence() -> bool:
     print("\n=== Check 6: dt Convergence Diagnostic (Implicit Scheme) ===")
-    print("  Using time-average E_T[p^2] as a stable weak-convergence diagnostic")
+    print("  Using time-average E_T[p^2] as a time-step sensitivity diagnostic")
 
     dts = [0.05, 0.02, 0.01, 0.005]
     total_time = 5000.0
@@ -231,10 +234,10 @@ def check_dt_convergence() -> bool:
     plt.loglog(dts, errors, "o-", color="darkred", lw=2)
     plt.xlabel(r"$\Delta t$")
     plt.ylabel(r"$|\langle p^2 \rangle_T - \langle p^2 \rangle_{ref}|$")
-    plt.title(r"Weak-Convergence Diagnostic: $\langle p^2 \rangle_T$ vs $\Delta t$")
+    plt.title(r"Time-Step Sensitivity Diagnostic: $\langle p^2 \rangle_T$ vs $\Delta t$")
     plt.grid(True, ls="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_DIR, "check6_dt_convergence.png"), dpi=200)
+    plt.savefig(FIGURE_DIR / "check6_dt_convergence.png")
     print("  Saved check6_dt_convergence.png")
     return ok
 
