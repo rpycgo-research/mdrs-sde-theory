@@ -189,18 +189,16 @@ def experiment_3_long_run_stability(sim: MDRSSimulator, num_steps: int = 2_000_0
     print(f"  Skewness  : {skew_bm:.6f}  (BM SE = {skew_se:.6f})")
     print(f"  Kurtosis  : {kurt_bm:.4f}  (BM SE = {kurt_se:.4f})")
 
-    np.savetxt(
+    with open(
         TABLE_DIR / "table_long_run_moments_batch_means.csv",
-        np.array([
-            [mean_bm, mean_se],
-            [std_bm, std_se],
-            [skew_bm, skew_se],
-            [kurt_bm, kurt_se],
-        ]),
-        delimiter=",",
-        header="estimate,batch_means_se",
-        comments="",
-    )
+        "w",
+        encoding="utf-8",
+    ) as f:
+        f.write("statistic,estimate,batch_means_se\n")
+        f.write(f"mean,{mean_bm},{mean_se}\n")
+        f.write(f"std,{std_bm},{std_se}\n")
+        f.write(f"skewness,{skew_bm},{skew_se}\n")
+        f.write(f"kurtosis,{kurt_bm},{kurt_se}\n")
 
     # --- Table 2: Threshold-moving volatility ---
     dp = np.diff(p)
