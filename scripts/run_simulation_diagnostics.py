@@ -21,9 +21,7 @@ import matplotlib.pyplot as plt
 from src.simulator import MDRSSimulator, DEFAULT_PARAMS
 
 RESULTS_DIR = Path("results")
-DIAGNOSTICS_DIR = RESULTS_DIR / "diagnostics"
-FIGURE_DIR = DIAGNOSTICS_DIR / "figures"
-
+FIGURE_DIR = RESULTS_DIR / "diagnostics" / "figures"
 FIGURE_DIR.mkdir(parents=True, exist_ok=True)
 
 PASS = "\033[92mPASS\033[0m"
@@ -67,7 +65,12 @@ def check_drift_dominance() -> bool:
     print(f"  Margin = {margin:.6f}")
 
     ok = margin > 0
-    print(f"  Result: {PASS if ok else WARN}")
+    if ok:
+        print("  Equilibrium-region condition: HOLDS")
+    else:
+        print("  Equilibrium-region condition: NOT SATISFIED")
+    print("  Scope: supports the equilibrium-region Lyapunov diagnostic only.")
+
     return ok
 
 
@@ -134,6 +137,7 @@ def check_running_mean_stabilization() -> bool:
 
     checkpoints = np.logspace(3, np.log10(n_steps), 30, dtype=int)
     checkpoints = np.unique(checkpoints)
+    checkpoints = checkpoints[checkpoints < n_steps]
     running_means = np.array([np.mean(p[:cp]) for cp in checkpoints])
     final_mean = float(np.mean(p))
     errors = np.abs(running_means - final_mean)
@@ -237,8 +241,9 @@ def check_dt_convergence() -> bool:
     plt.title(r"Time-Step Sensitivity Diagnostic: $\langle p^2 \rangle_T$ vs $\Delta t$")
     plt.grid(True, ls="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(FIGURE_DIR / "check6_dt_convergence.png")
-    print("  Saved check6_dt_convergence.png")
+    plt.savefig(FIGURE_DIR / "check6_dt_sensitivity.png")
+    print("  Saved check6_dt_sensitivity.png")
+
     return ok
 
 
