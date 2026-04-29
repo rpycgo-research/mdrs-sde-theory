@@ -189,24 +189,22 @@ def experiment_3_long_run_stability(sim: MDRSSimulator, num_steps: int = 2_000_0
     print(f"  Skewness  : {skew_bm:.6f}  (BM SE = {skew_se:.6f})")
     print(f"  Kurtosis  : {kurt_bm:.4f}  (BM SE = {kurt_se:.4f})")
 
-    np.savetxt(
+    with open(
         TABLE_DIR / "table_long_run_moments_batch_means.csv",
-        np.array([
-            [mean_bm, mean_se],
-            [std_bm, std_se],
-            [skew_bm, skew_se],
-            [kurt_bm, kurt_se],
-        ]),
-        delimiter=",",
-        header="estimate,batch_means_se",
-        comments="",
-    )
+        "w",
+        encoding="utf-8",
+    ) as f:
+        f.write("statistic,estimate,batch_means_se\n")
+        f.write(f"mean,{mean_bm},{mean_se}\n")
+        f.write(f"std,{std_bm},{std_se}\n")
+        f.write(f"skewness,{skew_bm},{skew_se}\n")
+        f.write(f"kurtosis,{kurt_bm},{kurt_se}\n")
 
     # --- Table 2: Threshold-moving volatility ---
     dp = np.diff(p)
     z_lag = z[:-1]
 
-    print("\n  [Table 2] Threshold-Moving Volatility Recovery")
+    print("\n  [Table 2] Regime-Conditional Volatility Separation")
     print(f"  {'Threshold':<15} {'N':<10} {'sigma_hat':<12} {'|sigma_hat-sigma_1|':<20} {'|sigma_hat-sigma_1_eff|'}")
     sigma_1_eff = (1 - sim.w_max) * sim.sigma_0 + sim.w_max * sim.sigma_1
     vol_rows = []
