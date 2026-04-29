@@ -200,6 +200,65 @@ def ou_oos_diagnostics(z: pd.Series, fit: dict) -> dict:
     }
 
 
+
+def ou_acf_diagnostics(
+    z: pd.Series,
+    fit: dict,
+    *,
+    max_lag: int = 300,
+) -> pd.DataFrame:
+    """Compare empirical ACF of Z with the OU-implied AR(1) ACF.
+
+    The fitted AR(1) slope b implies Corr(Z_t, Z_{t+k}) = b^k under the
+    discretized OU approximation. This diagnostic checks multi-lag persistence
+    beyond the one-step transition regression.
+    """
+    values = pd.Series(z).replace([np.inf, -np.inf], np.nan).dropna()
+    values = values.to_numpy(dtype=float)
+
+    if len(values) <= max_lag + 1:
+        raise ValueError("Not enough observations for requested ACF lag range.")
+
+    centered = values - float(np.mean(values))
+    denom = float(np.dot(centered, centered))
+    if denom <= 0:
+        raise ValueError("Cannot compute ACF for a constant series.")
+
+    slope = float(fit["b"])
+    rows: list[dict] = []
+    for lag in range(1, max_lag + 1):
+        empirical_acf = float(np.dot(centered[:-lag], centered[lag:]) / denom)
+        implied_acf = float(slope**lag)
+        rows.append(
+            {
+                "lag": lag,
+                "empirical_acf": empirical_acf,
+                "ou_implied_acf": implied_acf,
+                "abs_error": abs(empirical_acf - implied_acf),
+                "squared_error": (empirical_acf - implied_acf) ** 2,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def ou_acf_error_summary(acf_df: pd.DataFrame) -> dict:
+    """Summarize multi-lag ACF errors."""
+    if acf_df.empty:
+        return {
+            "max_lag": 0,
+            "acf_mae": np.nan,
+            "acf_rmse": np.nan,
+            "acf_max_abs_error": np.nan,
+        }
+
+    return {
+        "max_lag": int(acf_df["lag"].max()),
+        "acf_mae": float(acf_df["abs_error"].mean()),
+        "acf_rmse": float(np.sqrt(acf_df["squared_error"].mean())),
+        "acf_max_abs_error": float(acf_df["abs_error"].max()),
+    }
+
 def empirical_latched_extrema(
     df: pd.DataFrame,
     zeta: float = DEFAULT_ZETA,

@@ -24,6 +24,8 @@ from src.empirical import (
     fit_ou_ar1,
     fit_volatility_prediction,
     load_ohlcv,
+    ou_acf_diagnostics,
+    ou_acf_error_summary,
     ou_oos_diagnostics,
     real_data_moments,
     split_sample,
@@ -36,18 +38,20 @@ DEFAULT_FILES = [
     AssetFile("SOL", "solusdt_5m.csv"),
 ]
 
+MAIN_ASSETS = ("BTC", "ETH")
+ROBUSTNESS_ASSETS = ("XRP", "SOL")
+
 OUTPUT_TABLES = {
     "data_coverage.csv": "coverage_rows",
     "ou_calibration.csv": "ou_rows",
     "ou_oos_diagnostics.csv": "ou_oos_rows",
+    "ou_acf_diagnostics.csv": "ou_acf_rows",
+    "ou_acf_summary.csv": "ou_acf_summary_rows",
     "leaky_extrema_calibration.csv": "leaky_rows",
     "leaky_grid_search.csv": "leaky_grid_rows",
     "volatility_prediction_hac.csv": "vol_rows",
     "return_moments_batch_means.csv": "moment_rows",
 }
-
-MAIN_ASSETS = ("BTC", "ETH")
-ROBUSTNESS_ASSETS = ("XRP", "SOL")
 
 
 def parse_asset_files(items: list[str] | None) -> list[AssetFile]:
@@ -92,6 +96,13 @@ def parse_args() -> argparse.Namespace:
             "BTC:btcusdt_5m.csv ETH:ethusdt_5m.csv."
         ),
     )
+    parser.add_argument(
+        "--acf-max-lag",
+        type=int,
+        default=300,
+        help="Maximum lag for OU ACF diagnostics.",
+    )
+
     return parser.parse_args()
 
 
@@ -101,6 +112,8 @@ def empty_outputs() -> dict[str, list[dict]]:
         "coverage_rows": [],
         "ou_rows": [],
         "ou_oos_rows": [],
+        "ou_acf_rows": [],
+        "ou_acf_summary_rows": [],
         "leaky_rows": [],
         "leaky_grid_rows": [],
         "vol_rows": [],
@@ -113,7 +126,8 @@ def process_asset(
     asset_file: AssetFile,
     data_dir: Path,
     outputs: dict[str, list[dict]],
-    ) -> None:
+    acf_max_lag: int,
+) -> None:
     """Load one asset and append its empirical results to output containers."""
     path = data_dir / asset_file.filename
     if not path.exists():
@@ -127,10 +141,17 @@ def process_asset(
 
     outputs["coverage_rows"].append(data_coverage(df, asset_file.asset))
 
-    append_ou_results(
+    fit = append_ou_results(
         df=df,
         asset=asset_file.asset,
         outputs=outputs,
+    )
+    append_ou_acf_results(
+        df=df,
+        asset=asset_file.asset,
+        fit=fit,
+        outputs=outputs,
+        max_lag=acf_max_lag,
     )
     append_leaky_extrema_results(
         df=df,
@@ -154,7 +175,7 @@ def append_ou_results(
     df: pd.DataFrame,
     asset: str,
     outputs: dict[str, list[dict]],
-    ) -> None:
+) -> dict:
     """Fit AR(1)-to-OU parameters and append OOS diagnostics."""
     fit = fit_ou_ar1(split_sample(df, "train")["Z"])
     outputs["ou_rows"].append(
@@ -185,13 +206,52 @@ def append_ou_results(
             }
         )
 
+    return fit
+
+
+def append_ou_acf_results(
+    *,
+    df: pd.DataFrame,
+    asset: str,
+    fit: dict,
+    outputs: dict[str, list[dict]],
+    max_lag: int,
+) -> None:
+    """Append multi-lag OU ACF diagnostics."""
+    for split in ["train", "validation", "test", "recent"]:
+        try:
+            acf = ou_acf_diagnostics(
+                split_sample(df, split)["Z"],
+                fit,
+                max_lag=max_lag,
+            )
+        except ValueError:
+            continue
+
+        for row in acf.to_dict(orient="records"):
+            outputs["ou_acf_rows"].append(
+                {
+                    "Asset": asset,
+                    "Split": split,
+                    **row,
+                }
+            )
+
+        outputs["ou_acf_summary_rows"].append(
+            {
+                "Asset": asset,
+                "Split": split,
+                **ou_acf_error_summary(acf),
+            }
+        )
+
 
 def append_leaky_extrema_results(
     *,
     df: pd.DataFrame,
     asset: str,
     outputs: dict[str, list[dict]],
-    ) -> None:
+) -> None:
     """Calibrate and append leaky-extrema approximation results."""
     rows, grid = calibrate_leaky_extrema(df, asset)
     outputs["leaky_rows"].extend(rows)
@@ -203,7 +263,7 @@ def append_volatility_prediction_results(
     df: pd.DataFrame,
     asset: str,
     outputs: dict[str, list[dict]],
-    ) -> None:
+) -> None:
     """Append HAC volatility-prediction regression results."""
     for split in ["validation", "test", "recent"]:
         rows = fit_volatility_prediction(df, asset, split=split)
@@ -216,7 +276,7 @@ def append_moment_results(
     asset: str,
     outputs: dict[str, list[dict]],
 ) -> None:
-    """Append batch-means return-moment diagnostics."""
+    """Append robust return-moment diagnostics."""
     for split in ["train", "validation", "test", "recent"]:
         rows = real_data_moments(df, asset, split=split)
         outputs["moment_rows"].extend(rows)
@@ -226,7 +286,7 @@ def save_outputs(
     *,
     outputs: dict[str, list[dict]],
     out_dir: Path,
-    ) -> None:
+) -> None:
     """Write all output tables to CSV."""
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -275,7 +335,12 @@ def print_compact_summary(outputs: dict[str, list[dict]]) -> None:
         rows=outputs["ou_rows"],
         assets=MAIN_ASSETS,
     )
-
+    print_table_block(
+        title="OU ACF test summary",
+        rows=outputs["ou_acf_summary_rows"],
+        assets=MAIN_ASSETS,
+        query="Split == 'test'",
+    )
     print_table_block(
         title="Leaky-extrema test summary",
         rows=outputs["leaky_rows"],
@@ -291,7 +356,6 @@ def print_compact_summary(outputs: dict[str, list[dict]]) -> None:
             "Corr_S",
         ],
     )
-
     print_table_block(
         title="Volatility-prediction test summary",
         rows=outputs["vol_rows"],
@@ -315,7 +379,12 @@ def print_compact_summary(outputs: dict[str, list[dict]]) -> None:
         rows=outputs["ou_rows"],
         assets=ROBUSTNESS_ASSETS,
     )
-
+    print_table_block(
+        title="OU ACF robustness summary",
+        rows=outputs["ou_acf_summary_rows"],
+        assets=ROBUSTNESS_ASSETS,
+        query="Split == 'test'",
+    )
     print_table_block(
         title="Leaky-extrema test robustness summary",
         rows=outputs["leaky_rows"],
@@ -331,7 +400,6 @@ def print_compact_summary(outputs: dict[str, list[dict]]) -> None:
             "Corr_S",
         ],
     )
-
     print_table_block(
         title="Volatility-prediction test robustness summary",
         rows=outputs["vol_rows"],
@@ -362,6 +430,7 @@ def main() -> None:
             asset_file=asset_file,
             data_dir=data_dir,
             outputs=outputs,
+            acf_max_lag=args.acf_max_lag,
         )
 
     save_outputs(outputs=outputs, out_dir=out_dir)
