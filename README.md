@@ -1,106 +1,97 @@
-# MDRS-SDE Experiments
+# MDRS-SDE Theory and Empirical Benchmarks
 
-This repository contains simulation and empirical-analysis code for the paper on a Microstructure-Driven Regime-Switching Stochastic Differential Equation (MDRS-SDE) for cryptocurrency perpetual futures.
+This repository contains simulation, diagnostics, empirical-calibration, and out-of-sample benchmark code for the paper:
 
-The codebase has three roles:
+> **A Markovian Leaky-Extrema Approach to Path-Dependent Breakouts in Microstructure-Driven SDEs**
 
-1. Synthetic MDRS-SDE experiments.
-2. Numerical simulation diagnostics.
-3. Real-data empirical calibration using 5-minute perpetual futures data.
+The project studies a Microstructure-Driven Regime-Switching Stochastic Differential Equation (MDRS-SDE) for high-frequency cryptocurrency perpetual futures. The codebase supports four roles:
 
-The implementation follows the revised paper framing. In particular, long-run simulations are used as numerical evidence of stability behavior, not as a proof of total-variation geometric ergodicity.
+1. synthetic MDRS-SDE experiments;
+2. numerical simulation diagnostics;
+3. real-data empirical calibration using 5-minute perpetual futures data; and
+4. QF-style realized-volatility forecasting benchmarks based on positive log-HAR OOS forecasts.
+
+The implementation follows the revised paper framing. Synthetic long-run simulations are used as numerical evidence of stable behavior, not as a proof of total-variation geometric ergodicity. Empirical regressions are interpreted as evidence of incremental volatility-prediction content, not as universal trading profitability.
+
+Raw exchange data are **not redistributed**. The scripts expect user-provided OHLCV files with the schema described below.
 
 ---
 
-## Repository Structure
+## Repository layout
 
 ```text
 .
-├── data/
+├── README.md
+├── RELEASE_NOTES_v0.5.0.md
+├── pyproject.toml
+├── uv.lock
+├── data/                         # user-provided; not committed
 │   ├── btcusdt_5m.csv
 │   ├── ethusdt_5m.csv
 │   ├── xrpusdt_5m.csv
 │   └── solusdt_5m.csv
-│
-├── results/
+├── results/                      # generated; usually not committed
 │   ├── synthetic/
 │   │   ├── figures/
 │   │   └── tables/
 │   ├── diagnostics/
 │   │   └── figures/
-│   └── empirical/
-│
+│   ├── empirical/
+│   └── oos/
 ├── scripts/
 │   ├── __init__.py
-│   ├── synthetic_experiments.py
-│   ├── simulation_diagnostics.py
-│   └── empirical_calibration.py
-│
-├── src/
-│   ├── simulator.py
-│   └── empirical.py
-│
-├── pyproject.toml
-└── README.md
+│   ├── run_synthetic_experiments.py
+│   ├── run_simulation_diagnostics.py
+│   ├── run_empirical_calibration.py
+│   └── run_oos_benchmarks.py
+└── src/
+    ├── __init__.py
+    ├── simulator.py
+    ├── empirical.py
+    └── oos.py
 ```
 
-The top-level run scripts are exposed through `uv` console entry points:
+The console scripts are exposed through `uv` entry points:
 
 ```text
 synthetic_experiments
 simulation_diagnostics
 empirical_calibration
-```
-
-Recommended commands:
-
-```bash
-uv run synthetic_experiments
-uv run simulation_diagnostics
-uv run empirical_calibration --data-dir data --out-dir results/empirical
+oos_benchmarks
 ```
 
 ---
 
-## Setup
+## Environment
 
-This project is intended to run with `uv`.
+This project uses `uv` and Python `>=3.11,<3.14`.
 
 ```bash
 uv sync
 ```
 
-Required Python packages include:
+The main dependencies are:
 
 ```text
 numpy
+pandas
 scipy
+statsmodels
 matplotlib
 numba
-pandas
-statsmodels
 ```
 
-The `pyproject.toml` should include console entry points similar to:
-
-```toml
-[project.scripts]
-synthetic_experiments = "scripts.synthetic_experiments:main"
-simulation_diagnostics = "scripts.simulation_diagnostics:main"
-empirical_calibration = "scripts.empirical_calibration:main"
-```
-
-If the environment is not yet configured through `pyproject.toml`, install the dependencies manually:
+If the environment is not yet configured through `pyproject.toml`, install dependencies manually:
 
 ```bash
-uv add numpy scipy matplotlib numba pandas statsmodels
+uv add numpy pandas scipy statsmodels matplotlib numba
 ```
 
 ---
 
-## Data Requirements
+## Data requirements
 
-The empirical pipeline expects 5-minute OHLCV CSV files under the root-level `data/` directory.
+The empirical and QF benchmark pipelines expect 5-minute OHLCV CSV files under the root-level `data/` directory.
 
 Default file names:
 
@@ -117,13 +108,31 @@ Expected CSV columns:
 Datetime, Open, High, Low, Close, Volume
 ```
 
-The `Datetime` column should be parseable as a timestamp. The pipeline sorts by timestamp, removes duplicated timestamps, validates numeric OHLCV fields, and constructs log returns and rolling features internally.
+The `Datetime` column should be parseable as a timestamp. The pipeline sorts by timestamp, removes duplicate timestamps, validates numeric OHLCV fields, and constructs log returns and rolling features internally.
+
+If file names differ from the defaults, pass explicit asset mappings:
+
+```bash
+uv run empirical_calibration \
+  --data-dir data \
+  --out-dir results/empirical \
+  --assets BTC:btcusdt_5m.csv ETH:ethusdt_5m.csv XRP:xrpusdt_5m.csv SOL:solusdt_5m.csv
+```
+
+If a filename contains parentheses, escape them in bash:
+
+```bash
+uv run empirical_calibration \
+  --data-dir data \
+  --out-dir results/empirical \
+  --assets BTC:btcusdt_5m\(1\).csv ETH:ethusdt_5m.csv XRP:xrpusdt_5m.csv SOL:solusdt_5m.csv
+```
 
 ---
 
-## Asset Roles
+## Asset roles
 
-The empirical section uses BTC and ETH as the main assets and XRP and SOL as robustness assets.
+The empirical section uses BTC and ETH as the main assets, and XRP and SOL as robustness assets.
 
 ```text
 Main empirical assets:
@@ -137,43 +146,39 @@ Robustness assets:
 
 This split is used only for reporting. The pipeline processes all provided assets and writes results for every asset to CSV.
 
-The console summary prints BTC/ETH as the main block and XRP/SOL as a separate robustness block so that all processed assets are visible.
-
 ---
 
-## Empirical Sample Split
+## Empirical sample split
 
-The empirical pipeline uses a presample-aware split.
+The empirical pipeline uses a presample-aware split:
 
 ```text
 Presample / burn-in: available 2020 history
 Train:               2021-01-01 to 2023-12-31
 Validation:          2024-01-01 to 2024-12-31
 Test:                2025-01-01 to 2025-12-31
-Recent robustness:   2026-01-01 onward
+Recent robustness:   2026-01-01 onward, when available
 ```
 
 The 2020 observations are used only for:
 
 ```text
-- rolling-window initialization,
-- empirical support/resistance construction,
-- leaky-state burn-in,
+- rolling-window initialization;
+- empirical support/resistance construction;
+- leaky-state burn-in; and
 - data-quality checks.
 ```
 
-They are not used for parameter fitting, model selection, validation, or headline test reporting.
-
-Although SOLUSDT starts later in 2020 than BTC, ETH, and XRP, the available SOL presample before 2021 is still much longer than the 24-hour rolling window used for the signal and extrema construction.
+They are not used for headline parameter fitting, model selection, validation, or test reporting. Although SOLUSDT starts later in 2020 than BTC, ETH, and XRP, the available SOL presample before 2021 is still much longer than the 24-hour rolling window used for signal construction.
 
 ---
 
-## Synthetic Experiments
+## Synthetic experiments
 
 Run:
 
 ```bash
-uv run synthetic_experiments
+uv run synthetic_experiments --out-dir results/synthetic
 ```
 
 Generated outputs:
@@ -185,10 +190,10 @@ results/synthetic/tables/
 
 The synthetic experiments include:
 
-1. A trajectory illustration of the four-dimensional MDRS-SDE state.
-2. A finite-horizon breakout-time sensitivity experiment.
-3. A long-run distribution experiment.
-4. Regime-conditional volatility diagnostics.
+1. a representative trajectory illustration of the four-dimensional MDRS-SDE state;
+2. finite-horizon breakout-time sensitivity with respect to the activation threshold;
+3. a long-run distribution experiment; and
+4. regime-conditional volatility diagnostics.
 
 The synthetic long-run experiment reports batch-means uncertainty for serially dependent simulation output. It does not report iid t-statistics.
 
@@ -201,12 +206,12 @@ They do not prove total-variation geometric ergodicity of the full lifted proces
 
 ---
 
-## Simulation Diagnostics
+## Simulation diagnostics
 
 Run:
 
 ```bash
-uv run simulation_diagnostics
+uv run simulation_diagnostics --out-dir results/diagnostics
 ```
 
 Generated outputs:
@@ -218,44 +223,26 @@ results/diagnostics/figures/
 The diagnostics include numerical sanity checks such as:
 
 ```text
-- invariant support/resistance ordering,
-- drift-dominance parameter checks,
-- equilibrium-region stability diagnostics,
-- running-mean stabilization diagnostics,
-- time-step sensitivity diagnostics,
+- invariant support/resistance ordering;
+- drift-dominance parameter checks;
+- equilibrium-region stability diagnostics;
+- running-mean stabilization diagnostics;
+- time-step sensitivity diagnostics; and
 - finite-horizon exit-frequency diagnostics.
 ```
 
-These diagnostics are not theorem verification. They are intended to detect implementation issues and to provide numerical sanity checks for the simulator.
+These diagnostics are not theorem verification. They are intended to detect implementation issues and provide numerical sanity checks for the simulator.
 
 ---
 
-## Empirical Calibration Pipeline
+## Empirical calibration pipeline
 
-Run with the default data directory:
+Run:
 
 ```bash
 uv run empirical_calibration \
   --data-dir data \
   --out-dir results/empirical
-```
-
-If file names differ from the defaults, provide explicit asset mappings:
-
-```bash
-uv run empirical_calibration \
-  --data-dir data \
-  --out-dir results/empirical \
-  --assets BTC:btcusdt_5m.csv ETH:ethusdt_5m.csv XRP:xrpusdt_5m.csv SOL:solusdt_5m.csv
-```
-
-If your BTC file is named `btcusdt_5m.csv`, escape the parentheses in bash:
-
-```bash
-uv run empirical_calibration \
-  --data-dir data \
-  --out-dir results/empirical \
-  --assets BTC:btcusdt_5m.csv ETH:ethusdt_5m.csv XRP:xrpusdt_5m.csv SOL:solusdt_5m.csv
 ```
 
 Generated empirical outputs:
@@ -272,11 +259,7 @@ results/empirical/volatility_prediction_hac.csv
 results/empirical/return_moments_robust_se.csv
 ```
 
----
-
-## Empirical Pipeline Details
-
-### 1. Microstructure Signal Construction
+### 1. Microstructure signal construction
 
 The empirical signal is constructed from 5-minute OHLCV data.
 
@@ -297,7 +280,7 @@ Z_t = (1/3) * sum_{j=0}^{2} max(Z_volume,t-j, Z_return,t-j)
 
 The return component uses absolute returns because the signal is intended to measure activation and volatility-expansion magnitude rather than signed price direction.
 
-### 2. OU Calibration
+### 2. OU calibration
 
 The pipeline fits a one-step AR(1) transition on the training period:
 
@@ -305,7 +288,7 @@ The pipeline fits a one-step AR(1) transition on the training period:
 Z_{t+1} = a + b Z_t + eps_t
 ```
 
-The AR(1) fit is converted to OU parameters:
+The AR(1) fit is converted to OU-style parameters:
 
 ```text
 kappa_Z
@@ -314,13 +297,13 @@ sigma_Z
 half-life
 ```
 
-Out-of-sample diagnostics are reported on validation, test, and recent windows.
+Out-of-sample diagnostics are reported on validation, test, and recent windows. The OU specification is treated as a structural ansatz supported by empirical transition and ACF diagnostics, not as a proven weak limit of the discrete signal.
 
-### 3. Leaky-Extrema Calibration
+### 3. Leaky-extrema calibration
 
 The pipeline constructs empirical rolling support and resistance levels over quiet regimes and compares them against simulated leaky support/resistance variables.
 
-The leaky-extrema parameters are selected using validation mean absolute error. The final approximation quality is reported separately on train, validation, test, and recent splits.
+The leaky-extrema parameters are selected using validation mean absolute error. Final approximation quality is reported separately on train, validation, test, and recent splits.
 
 Reported metrics include:
 
@@ -334,14 +317,14 @@ Corr_S
 Mean_MAE
 ```
 
-The 2025 test split should be used for headline out-of-sample results.
+The 2025 test split should be used for headline out-of-sample leaky-extrema results.
 
-### 4. Volatility Prediction with HAC Inference
+### 4. Volatility prediction with HAC inference
 
-The pipeline estimates realized-volatility prediction regressions:
+The baseline volatility regression is:
 
 ```text
-RV_future = a + b Z_t + c RV_past + error
+RV_{t:t+h} = a_h + b_h Z_t + c_h RV_{t-h:t} + epsilon_{t,h}
 ```
 
 Horizons:
@@ -353,13 +336,11 @@ Horizons:
 24h = 288 bars
 ```
 
-HAC standard errors are reported for the coefficient on `Z_t`.
+HAC standard errors are reported for the coefficient on `Z_t`. The main empirical claim should be phrased as incremental predictive content for future realized volatility, not high explanatory power.
 
-The main empirical claim should be phrased as incremental predictive content for future realized volatility, not high explanatory power.
+### 5. Robust moment inference
 
-### 5. Batch-Means Moment Inference
-
-For serially dependent return moments, the pipeline reports batch-means standard errors for:
+For serially dependent return moments, the pipeline reports robust or batch-means standard errors for:
 
 ```text
 mean
@@ -372,32 +353,78 @@ This avoids iid standard errors for high-frequency crypto time series.
 
 ---
 
+## Positive log-HAR OOS benchmarks
 
+Positive log-HAR out-of-sample benchmarks for journal-review robustness.
 
-### OU Time Units
+Run:
 
-Empirical OU parameters are reported in calendar-day units because the data are sampled at 5-minute frequency. The synthetic MDRS-SDE experiments use normalized model time, so synthetic parameters such as `kappa_Z` should not be interpreted as numerically identical to the empirical calendar-time estimates.
+```bash
+uv run oos_benchmarks \
+  --data-dir data \
+  --out-dir results/oos
+```
 
-### OU Autocorrelation Diagnostics
+Optional asset mapping:
 
-In addition to one-step AR(1)-to-OU transition diagnostics, the empirical pipeline reports multi-lag ACF diagnostics. The fitted AR(1) slope `b` implies an OU-style autocorrelation curve `b^lag`; the pipeline compares this curve with the empirical ACF of the signal on train, validation, test, and recent splits.
+```bash
+uv run oos_benchmarks \
+  --data-dir data \
+  --out-dir results/oos \
+  --assets BTC:btcusdt_5m.csv ETH:ethusdt_5m.csv XRP:xrpusdt_5m.csv SOL:solusdt_5m.csv
+```
+
+### Benchmark design
+
+The main comparison is:
+
+```text
+HAR-logRV baseline:
+log RV_{t:t+h} ~ log RV_h + log RV_d + log RV_w + log RV_m
+
+HAR-logRV + Z:
+log RV_{t:t+h} ~ Z_t + log RV_h + log RV_d + log RV_w + log RV_m
+```
+
+For the 24-hour horizon, duplicate daily regressors are automatically removed. Forecasts are transformed back to strictly positive realized-variance forecasts using a smearing correction, making MSE and QLIKE losses well defined.
 
 Generated files:
 
 ```text
-results/empirical/ou_acf_diagnostics.csv
-results/empirical/ou_acf_summary.csv
+results/oos/static_oos_forecast_tests_main_with_bootstrap.csv
+results/oos/static_oos_winsorization_robustness.csv
+results/oos/static_oos_logrv_spec_robustness.csv
 ```
 
-### Calendar-Block Bootstrap Inference
+These tables report:
 
-For real-data return moments, the pipeline reports daily and weekly calendar-block bootstrap standard errors in addition to batch-means standard errors. Daily block bootstrap is the main real-data moment uncertainty estimate, while weekly block bootstrap and batch means are robustness checks.
+```text
+- HAR vs HAR+Z MSE and QLIKE losses;
+- MSE and QLIKE improvements;
+- train-period incremental R²;
+- Diebold--Mariano-style HAC tests for loss differences;
+- Clark--West nested forecast tests for MSE loss;
+- moving-block bootstrap confidence intervals and one-sided p-values;
+- robustness to Z_t winsorization; and
+- robustness to log-RV/smearing and level-RV positivity specifications.
+```
 
-Synthetic simulation moments continue to use batch-means standard errors because synthetic model time has no calendar-day structure.
+### Recommended interpretation of benchmarks
+
+The log-HAR benchmark is intended as a robustness check for incremental forecasting content. It should be interpreted conservatively:
+
+```text
+- BTC and ETH are the primary liquid assets.
+- SOL and XRP are robustness assets.
+- Evidence should be described as incremental OOS volatility-forecasting content.
+- Results should not be described as universal trading profitability.
+- QLIKE results should be based on positive forecasts.
+- Floor-constrained level-RV forecasts are included only as a robustness check.
+```
 
 ---
 
-## Interpreting the Results
+## Interpreting the results
 
 Recommended interpretation:
 
@@ -411,23 +438,28 @@ The leaky support/resistance variables closely approximate empirical rolling ext
 Volatility prediction:
 The microstructure signal has positive incremental predictive content for future realized variance, especially for BTC and ETH.
 
+Positive log-HAR OOS benchmark:
+The signal can be evaluated against HAR-style realized-volatility baselines using positive log-RV forecasts and MSE/QLIKE losses.
+
 Return moments:
-Daily calendar-block bootstrap should be used as the main real-data uncertainty estimate for moments; weekly block bootstrap and batch means are robustness checks. Unconditional skewness should not be overstated unless robust uncertainty supports it.
+Robust or batch-means inference should be used for serially dependent moments. Unconditional skewness should not be overstated unless robust uncertainty supports it.
 ```
 
 Do not claim:
 
 ```text
-- exact convergence of the empirical signal to an OU process,
-- exact Markovian lifting of rolling-window extrema,
-- total-variation geometric ergodicity of the full lifted process,
-- iid significance of simulation moments,
-- universal negative skewness in raw high-frequency returns.
+- exact convergence of the empirical signal to an OU process;
+- exact Markovian lifting of rolling-window extrema;
+- total-variation geometric ergodicity of the full lifted process;
+- iid significance of simulation moments;
+- universal negative skewness in raw high-frequency returns;
+- universal volatility-forecasting improvement across all assets and horizons; or
+- direct trading profitability from the forecasting regressions alone.
 ```
 
 ---
 
-## Output Hygiene
+## Output hygiene
 
 Generated outputs should remain under `results/`.
 
@@ -441,49 +473,25 @@ results/
   diagnostics/
     figures/
   empirical/
+  oos/
 ```
 
-Avoid committing Python cache files:
-
-```text
-__pycache__/
-*.pyc
-*.pyo
-*.nbc
-*.nbi
-```
-
-A recommended `.gitignore` snippet is:
-
-```gitignore
-__pycache__/
-*.py[cod]
-*.nbc
-*.nbi
-```
-
-If generated results should not be tracked, also add:
-
-```gitignore
-results/
-```
-
-If the repository is intended as a paper-replication archive, it is acceptable to include selected generated CSVs and figures under `results/`.
+If the repository is intended as a paper-replication archive, it is acceptable to include selected generated CSVs and figures under `results/`, but raw exchange data should not be redistributed.
 
 ---
 
-## Reproducibility Commands
+## Reproducibility commands
 
 Run the full synthetic workflow:
 
 ```bash
-uv run synthetic_experiments
+uv run synthetic_experiments --out-dir results/synthetic
 ```
 
 Run simulator diagnostics:
 
 ```bash
-uv run simulation_diagnostics
+uv run simulation_diagnostics --out-dir results/diagnostics
 ```
 
 Run empirical calibration:
@@ -494,17 +502,26 @@ uv run empirical_calibration \
   --out-dir results/empirical
 ```
 
-Run all three:
+Run QF-style OOS benchmarks:
 
 ```bash
-uv run synthetic_experiments
-uv run simulation_diagnostics
+uv run oos_benchmarks \
+  --data-dir data \
+  --out-dir results/oos
+```
+
+Run the main workflows sequentially:
+
+```bash
+uv run synthetic_experiments --out-dir results/synthetic
+uv run simulation_diagnostics --out-dir results/diagnostics
 uv run empirical_calibration --data-dir data --out-dir results/empirical
+uv run oos_benchmarks --data-dir data --out-dir results/oos
 ```
 
 ---
 
-## Suggested Citation of Outputs in the Paper
+## Suggested citation of outputs in the paper
 
 Synthetic outputs:
 
@@ -525,21 +542,27 @@ results/diagnostics/figures/check4_running_mean_stabilization.png
 results/diagnostics/figures/check6_dt_sensitivity.png
 ```
 
-Empirical outputs:
+Empirical calibration outputs:
 
 ```text
 results/empirical/ou_calibration.csv
 results/empirical/ou_oos_diagnostics.csv
-results/empirical/ou_acf_diagnostics.csv
-results/empirical/ou_acf_summary.csv
 results/empirical/leaky_extrema_calibration.csv
 results/empirical/volatility_prediction_hac.csv
 results/empirical/return_moments_robust_se.csv
 ```
 
+QF benchmark outputs:
+
+```text
+results/oos/static_oos_forecast_tests_main_with_bootstrap.csv
+results/oos/static_oos_winsorization_robustness.csv
+results/oos/static_oos_logrv_spec_robustness.csv
+```
+
 ---
 
-## Notes for Paper Claims
+## Notes for paper claims
 
 The repository follows the revised paper framing:
 
@@ -547,7 +570,15 @@ The repository follows the revised paper framing:
 - Rolling extrema motivate the empirical construction.
 - The theoretical state variables are leaky-extrema regularizations.
 - The OU signal is a structural ansatz supported by empirical transition diagnostics.
-- Viscosity uniqueness is established for the smoothed recalibration problem.
+- Viscosity uniqueness is established for the smoothed recalibration problem under a standard comparison principle.
 - Stability results are Lyapunov-type and excursion-control results, not full geometric ergodicity.
-- Empirical inference uses HAC or batch-means corrections to address serial dependence.
+- Empirical inference uses HAC, robust, batch-means, or OOS loss-comparison methods to address serial dependence.
+- QF-style OOS benchmarks should be presented as incremental volatility-forecasting evidence, not as a standalone trading strategy.
 ```
+
+---
+
+
+## License and data note
+
+This code is provided for research reproducibility. Raw exchange data are not redistributed. Users should obtain OHLCV data from sources they are authorized to use and place the files under `data/` using the expected schema.
