@@ -4,15 +4,16 @@ This repository contains simulation, diagnostics, empirical-calibration, and out
 
 > **A Markovian Leaky-Extrema Approach to Path-Dependent Breakouts in Microstructure-Driven SDEs**
 
-The project studies a Microstructure-Driven Regime-Switching Stochastic Differential Equation (MDRS-SDE) for high-frequency cryptocurrency perpetual futures. The codebase supports seven roles:
+The project studies a Microstructure-Driven Regime-Switching Stochastic Differential Equation (MDRS-SDE) for high-frequency cryptocurrency perpetual futures. The codebase supports eight roles:
 
 1. synthetic MDRS-SDE experiments;
 2. numerical simulation diagnostics;
 3. real-data empirical calibration using 5-minute perpetual futures data;
 4. positive log-HAR out-of-sample benchmark tests;
 5. paper-ready OOS figure generation for benchmark and activation diagnostics;
-6. timeout-safe realized-volatility forecasting diagnostics using stronger HAR-family baselines; and
-7. actual funding-rate control diagnostics for perpetual-futures mechanism checks.
+6. timeout-safe realized-volatility forecasting diagnostics using stronger HAR-family baselines;
+7. actual funding-rate control diagnostics for perpetual-futures mechanism checks; and
+8. forecasting robustness diagnostics for liquidity ranking, pooled loss tests, funding-window effects, and margin capital-efficiency checks.
 
 The implementation follows the revised paper framing. Synthetic long-run simulations are used as numerical evidence of stable behavior, not as a proof of total-variation geometric ergodicity. Empirical regressions are interpreted as evidence of incremental volatility-prediction content, not as universal trading profitability.
 
@@ -48,7 +49,8 @@ Raw exchange data are **not redistributed**. The scripts expect user-provided OH
 │   ├── oos/
 │   ├── figures/
 │   ├── volatility_forecasting/
-│   └── funding_controls/
+│   ├── funding_controls/
+│   └── forecasting_robustness/
 ├── scripts/
 │   ├── __init__.py
 │   ├── run_synthetic_experiments.py
@@ -58,14 +60,17 @@ Raw exchange data are **not redistributed**. The scripts expect user-provided OH
 │   ├── plot_oos_figures.py
 │   ├── run_volatility_forecasting_experiments.py
 │   ├── combine_forecasting_outputs.py
-│   └── run_funding_control_experiments.py
+│   ├── run_funding_control_experiments.py
+│   ├── run_forecasting_robustness_experiments.py
+│   └── combine_forecasting_robustness_outputs.py
 └── src/
     ├── __init__.py
     ├── simulator.py
     ├── empirical.py
     ├── oos.py
     ├── volatility_forecasting_fast.py
-    └── funding_rate_controls.py
+    ├── funding_rate_controls.py
+    └── forecasting_robustness.py
 ```
 
 The console scripts are exposed through `uv` entry points:
@@ -77,7 +82,7 @@ empirical_calibration
 oos_benchmarks
 ```
 
-The timeout-safe forecasting, funding-control diagnostics, and OOS plotting utilities are provided as standalone Python scripts under `scripts/` and can be run with `uv run python scripts/<script_name>.py`.
+The timeout-safe forecasting, funding-control diagnostics, forecasting robustness diagnostics, and OOS plotting utilities are provided as standalone Python scripts under `scripts/` and can be run with `uv run python scripts/<script_name>.py`.
 
 ---
 
@@ -182,7 +187,7 @@ Robustness assets:
 - SOLUSDT
 ```
 
-This split is used only for reporting. The pipeline processes all provided assets and writes results for every asset to CSV.
+BTC and ETH are designated as primary assets by an ex-ante liquidity rule: they are the two largest contracts by average daily notional trading volume during the 2024 validation period. XRP and SOL are included as robustness assets to assess whether the activation effect extends beyond the two most liquid contracts. This split is used only for reporting. The pipeline processes all provided assets and writes results for every asset to CSV.
 
 ---
 
@@ -509,7 +514,7 @@ The plotting utility normalizes several possible benchmark-output column names, 
 
 ## Timeout-safe volatility forecasting diagnostics
 
-For faster review-oriented diagnostics, the repository includes a lightweight forecasting runner that evaluates stronger HAR-family baselines without running the heavier bootstrap workflow.
+For faster forecasting diagnostics, the repository includes a lightweight runner that evaluates stronger HAR-family baselines without running the heavier bootstrap workflow.
 
 Run BTC and ETH:
 
@@ -613,6 +618,83 @@ where `F` denotes actual funding-rate controls and `window` denotes an indicator
 
 ---
 
+## Forecasting robustness diagnostics
+
+The repository includes additional forecasting robustness diagnostics for asset-selection robustness, pooled forecasting evidence, funding-window activation, and risk-management interpretation. These diagnostics are separate from trading-strategy backtests and are designed to support realized-volatility forecasting claims.
+
+Run all forecasting robustness diagnostics:
+
+```bash
+uv run python scripts/run_forecasting_robustness_experiments.py \
+  --data-dir data \
+  --funding-dir data/funding_rate \
+  --out-dir results/forecasting_robustness
+```
+
+Run selected diagnostics by skipping other modules:
+
+```bash
+uv run python scripts/run_forecasting_robustness_experiments.py \
+  --data-dir data \
+  --funding-dir data/funding_rate \
+  --out-dir results/forecasting_robustness \
+  --skip-margin \
+  --skip-hyperparameter-sensitivity
+```
+
+Combine separated outputs when diagnostics are run asset-by-asset:
+
+```bash
+uv run python scripts/combine_forecasting_robustness_outputs.py \
+  --input-dirs results/forecasting_robustness_btc results/forecasting_robustness_eth results/forecasting_robustness_xrp results/forecasting_robustness_sol \
+  --out-dir results/forecasting_robustness
+```
+
+Generated files:
+
+```text
+results/forecasting_robustness/ex_ante_liquidity_2024.csv
+results/forecasting_robustness/har_per_origin_loss_details.csv
+results/forecasting_robustness/pooled_loss_tests.csv
+results/forecasting_robustness/funding_window_effect_size.csv
+results/forecasting_robustness/margin_capital_efficiency_diagnostics.csv
+results/forecasting_robustness/hyperparameter_sensitivity_btc_smoke_test.csv
+```
+
+The diagnostics cover:
+
+```text
+ex_ante_liquidity_2024.csv:
+  ranks BTC, ETH, SOL, and XRP by 2024 validation-period average daily notional volume.
+
+har_per_origin_loss_details.csv:
+  stores per-origin HAR and HAR+Z forecast losses for pooled inference.
+
+pooled_loss_tests.csv:
+  reports BTC/ETH pooled and all-asset pooled loss tests across horizons.
+
+funding_window_effect_size.csv:
+  reports inside-window versus outside-window activation differences around actual funding timestamps.
+
+margin_capital_efficiency_diagnostics.csv:
+  compares HAR and HAR+Z forecasts in validation-calibrated margin-style risk diagnostics.
+
+hyperparameter_sensitivity_btc_smoke_test.csv:
+  provides an initial activation-signal sensitivity smoke test for local verification.
+```
+
+Recommended interpretation:
+
+```text
+- Liquidity ranking supports BTC and ETH as pre-test primary assets.
+- Pooled loss tests provide robustness evidence and do not replace asset-level reporting.
+- Funding-window effects should be described as small but systematic.
+- Margin diagnostics provide risk-management interpretation, not trading-strategy profitability.
+- Hyperparameter sensitivity hooks are optional diagnostics for activation-window, smoothing, and pooling choices.
+```
+
+---
+
 ## Interpreting the results
 
 Recommended interpretation:
@@ -665,6 +747,7 @@ results/
   oos/
   volatility_forecasting/
   funding_controls/
+  forecasting_robustness/
 ```
 
 If the repository is intended as a paper-replication archive, it is acceptable to include selected generated CSVs and figures under `results/`, but raw exchange data should not be redistributed.
@@ -733,6 +816,15 @@ uv run python scripts/run_funding_control_experiments.py \
   --funding-window-minutes 60
 ```
 
+Run forecasting robustness diagnostics:
+
+```bash
+uv run python scripts/run_forecasting_robustness_experiments.py \
+  --data-dir data \
+  --funding-dir data/funding_rate \
+  --out-dir results/forecasting_robustness
+```
+
 Run the main workflows sequentially:
 
 ```bash
@@ -743,6 +835,7 @@ uv run oos_benchmarks --data-dir data --out-dir results/oos
 uv run python scripts/plot_oos_figures.py --results-dir results/oos --data-dir data --out-dir results/figures --assets BTC ETH --activation-assets BTC
 uv run python scripts/run_volatility_forecasting_experiments.py --data-dir data --all-assets --out-dir results/volatility_forecasting --run-validation-selection
 uv run python scripts/run_funding_control_experiments.py --data-dir data --funding-dir data/funding_rate --all-assets --out-dir results/funding_controls --funding-window-minutes 60
+uv run python scripts/run_forecasting_robustness_experiments.py --data-dir data --funding-dir data/funding_rate --out-dir results/forecasting_robustness
 ```
 
 ---
@@ -812,6 +905,17 @@ results/funding_controls/actual_funding_activation_summary.csv
 results/funding_controls/actual_funding_window_loss_diagnostics.csv
 ```
 
+Forecasting robustness diagnostic outputs:
+
+```text
+results/forecasting_robustness/ex_ante_liquidity_2024.csv
+results/forecasting_robustness/har_per_origin_loss_details.csv
+results/forecasting_robustness/pooled_loss_tests.csv
+results/forecasting_robustness/funding_window_effect_size.csv
+results/forecasting_robustness/margin_capital_efficiency_diagnostics.csv
+results/forecasting_robustness/hyperparameter_sensitivity_btc_smoke_test.csv
+```
+
 
 ---
 
@@ -831,6 +935,9 @@ The repository follows the revised paper framing:
 - Stronger HAR-family diagnostics should be presented as robustness evidence that the activation signal remains informative beyond the baseline positive log-HAR specification.
 - Funding-rate control diagnostics should be interpreted as showing that actual funding-rate levels do not subsume the activation signal; they should not be described as causal identification of funding-rate-driven volatility.
 - Funding-window diagnostics are mechanism checks around settlement timing and should not be interpreted as standalone trading signals.
+- Forecasting robustness diagnostics should be used to support asset-selection, pooled-evidence, funding-window effect-size, and risk-management interpretation claims.
+- Margin capital-efficiency diagnostics should not be described as trading-strategy profitability.
+- Hyperparameter sensitivity outputs should be treated as robustness diagnostics, not as test-period tuning.
 ```
 
 ---
