@@ -4,12 +4,15 @@ This repository contains simulation, diagnostics, empirical-calibration, and out
 
 > **A Markovian Leaky-Extrema Approach to Path-Dependent Breakouts in Microstructure-Driven SDEs**
 
-The project studies a Microstructure-Driven Regime-Switching Stochastic Differential Equation (MDRS-SDE) for high-frequency cryptocurrency perpetual futures. The codebase supports four roles:
+The project studies a Microstructure-Driven Regime-Switching Stochastic Differential Equation (MDRS-SDE) for high-frequency cryptocurrency perpetual futures. The codebase supports seven roles:
 
 1. synthetic MDRS-SDE experiments;
 2. numerical simulation diagnostics;
-3. real-data empirical calibration using 5-minute perpetual futures data; and
-4. QF-style realized-volatility forecasting benchmarks based on positive log-HAR OOS forecasts.
+3. real-data empirical calibration using 5-minute perpetual futures data;
+4. positive log-HAR out-of-sample benchmark tests;
+5. paper-ready OOS figure generation for benchmark and activation diagnostics;
+6. timeout-safe realized-volatility forecasting diagnostics using stronger HAR-family baselines; and
+7. actual funding-rate control diagnostics for perpetual-futures mechanism checks.
 
 The implementation follows the revised paper framing. Synthetic long-run simulations are used as numerical evidence of stable behavior, not as a proof of total-variation geometric ergodicity. Empirical regressions are interpreted as evidence of incremental volatility-prediction content, not as universal trading profitability.
 
@@ -29,7 +32,12 @@ Raw exchange data are **not redistributed**. The scripts expect user-provided OH
 │   ├── btcusdt_5m.csv
 │   ├── ethusdt_5m.csv
 │   ├── xrpusdt_5m.csv
-│   └── solusdt_5m.csv
+│   ├── solusdt_5m.csv
+│   └── funding_rate/
+│       ├── btcusdt.csv
+│       ├── ethusdt.csv
+│       ├── xrpusdt.csv
+│       └── solusdt.csv
 ├── results/                      # generated; usually not committed
 │   ├── synthetic/
 │   │   ├── figures/
@@ -37,18 +45,27 @@ Raw exchange data are **not redistributed**. The scripts expect user-provided OH
 │   ├── diagnostics/
 │   │   └── figures/
 │   ├── empirical/
-│   └── oos/
+│   ├── oos/
+│   ├── figures/
+│   ├── volatility_forecasting/
+│   └── funding_controls/
 ├── scripts/
 │   ├── __init__.py
 │   ├── run_synthetic_experiments.py
 │   ├── run_simulation_diagnostics.py
 │   ├── run_empirical_calibration.py
-│   └── run_oos_benchmarks.py
+│   ├── run_oos_benchmarks.py
+│   ├── plot_oos_figures.py
+│   ├── run_volatility_forecasting_experiments.py
+│   ├── combine_forecasting_outputs.py
+│   └── run_funding_control_experiments.py
 └── src/
     ├── __init__.py
     ├── simulator.py
     ├── empirical.py
-    └── oos.py
+    ├── oos.py
+    ├── volatility_forecasting_fast.py
+    └── funding_rate_controls.py
 ```
 
 The console scripts are exposed through `uv` entry points:
@@ -59,6 +76,8 @@ simulation_diagnostics
 empirical_calibration
 oos_benchmarks
 ```
+
+The timeout-safe forecasting, funding-control diagnostics, and OOS plotting utilities are provided as standalone Python scripts under `scripts/` and can be run with `uv run python scripts/<script_name>.py`.
 
 ---
 
@@ -127,6 +146,25 @@ uv run empirical_calibration \
   --out-dir results/empirical \
   --assets BTC:btcusdt_5m\(1\).csv ETH:ethusdt_5m.csv XRP:xrpusdt_5m.csv SOL:solusdt_5m.csv
 ```
+
+### Funding-rate data
+
+Funding-control diagnostics additionally expect actual funding-rate CSV files under:
+
+```text
+data/funding_rate/btcusdt.csv
+data/funding_rate/ethusdt.csv
+data/funding_rate/xrpusdt.csv
+data/funding_rate/solusdt.csv
+```
+
+Expected funding-rate columns:
+
+```text
+datetime, calc_time, funding_interval_hours, last_funding_rate
+```
+
+The funding-control pipeline uses `last_funding_rate` as the actual funding-rate level and aligns funding observations to 5-minute forecast origins using backward causal as-of merging. Each forecast origin therefore receives only the most recently available funding-rate observation. The funding files are user-provided and are not redistributed with the repository.
 
 ---
 
@@ -424,6 +462,157 @@ The log-HAR benchmark is intended as a robustness check for incremental forecast
 
 ---
 
+## OOS figure generation
+
+The repository includes a plotting utility for paper-ready figures based on the positive log-HAR OOS benchmark outputs. It reads the main OOS benchmark CSV and optionally uses raw OHLCV files to generate activation-episode figures.
+
+Run the default BTC/ETH OOS figures and a BTC activation episode figure:
+
+```bash
+uv run python scripts/plot_oos_figures.py \
+  --results-dir results/oos \
+  --data-dir data \
+  --out-dir results/figures \
+  --assets BTC ETH \
+  --activation-assets BTC
+```
+
+Optional multi-asset activation examples:
+
+```bash
+uv run python scripts/plot_oos_figures.py \
+  --results-dir results/oos \
+  --data-dir data \
+  --out-dir results/figures \
+  --assets BTC ETH \
+  --activation-assets BTC ETH
+```
+
+Expected input:
+
+```text
+results/oos/static_oos_forecast_tests_main_with_bootstrap.csv
+```
+
+Generated figure files:
+
+```text
+results/figures/fig_oos_mse_improvement_btc_eth.pdf
+results/figures/fig_oos_qlike_improvement_btc_eth.pdf
+results/figures/fig_clark_west_pvalues_btc_eth.pdf
+results/figures/fig_activation_episode_BTC.pdf
+```
+
+The plotting utility normalizes several possible benchmark-output column names, including `MSE_improvement`, `MSE_improvement_pct`, `QLIKE_improvement`, and Clark--West p-value aliases. The activation-episode figure selects the highest activation point in 2025 when available; otherwise it falls back to the highest activation point in the full available sample.
+
+---
+
+## Timeout-safe volatility forecasting diagnostics
+
+For faster review-oriented diagnostics, the repository includes a lightweight forecasting runner that evaluates stronger HAR-family baselines without running the heavier bootstrap workflow.
+
+Run BTC and ETH:
+
+```bash
+uv run python scripts/run_volatility_forecasting_experiments.py \
+  --data-dir data \
+  --assets BTC:btcusdt_5m.csv ETH:ethusdt_5m.csv \
+  --out-dir results/volatility_forecasting \
+  --run-validation-selection
+```
+
+Run all assets:
+
+```bash
+uv run python scripts/run_volatility_forecasting_experiments.py \
+  --data-dir data \
+  --all-assets \
+  --out-dir results/volatility_forecasting \
+  --run-validation-selection
+```
+
+If asset-level runs are needed to avoid timeouts:
+
+```bash
+uv run python scripts/run_volatility_forecasting_experiments.py \
+  --data-dir data \
+  --assets BTC:btcusdt_5m.csv \
+  --out-dir results/volatility_forecasting_btc \
+  --run-validation-selection
+
+uv run python scripts/run_volatility_forecasting_experiments.py \
+  --data-dir data \
+  --assets ETH:ethusdt_5m.csv \
+  --out-dir results/volatility_forecasting_eth \
+  --run-validation-selection
+
+uv run python scripts/combine_forecasting_outputs.py \
+  --input-dirs results/volatility_forecasting_btc results/volatility_forecasting_eth \
+  --out-dir results/volatility_forecasting
+```
+
+Generated files:
+
+```text
+results/volatility_forecasting/stronger_benchmark_tests.csv
+results/volatility_forecasting/validation_selected_family_tests.csv
+results/volatility_forecasting/scheduled_funding_window_diagnostics.csv
+results/volatility_forecasting/high_volatility_ranking_diagnostics.csv
+```
+
+These diagnostics compare HAR, HARQ-style, and realized-semivariance HAR families. They are intended to show whether the activation signal remains informative relative to stronger realized-volatility benchmark families.
+
+---
+
+## Actual funding-rate control diagnostics
+
+Actual funding-rate control diagnostics test whether the activation signal is subsumed by observed funding-rate pressure.
+
+Run all assets:
+
+```bash
+uv run python scripts/run_funding_control_experiments.py \
+  --data-dir data \
+  --funding-dir data/funding_rate \
+  --all-assets \
+  --out-dir results/funding_controls \
+  --funding-window-minutes 60
+```
+
+Run BTC and ETH only:
+
+```bash
+uv run python scripts/run_funding_control_experiments.py \
+  --data-dir data \
+  --funding-dir data/funding_rate \
+  --assets BTC:btcusdt_5m.csv ETH:ethusdt_5m.csv \
+  --funding-files BTC:btcusdt.csv ETH:ethusdt.csv \
+  --out-dir results/funding_controls \
+  --funding-window-minutes 60
+```
+
+Generated files:
+
+```text
+results/funding_controls/actual_funding_control_tests.csv
+results/funding_controls/actual_funding_activation_summary.csv
+results/funding_controls/actual_funding_window_loss_diagnostics.csv
+```
+
+The main model comparison is:
+
+```text
+HAR
+HAR+F
+HAR+Z
+HAR+Z+F
+HAR+Z+F+window
+```
+
+where `F` denotes actual funding-rate controls and `window` denotes an indicator for observations near actual funding-settlement timestamps. These diagnostics should be interpreted as mechanism checks, not as causal identification of funding-rate effects.
+
+---
+
 ## Interpreting the results
 
 Recommended interpretation:
@@ -474,6 +663,8 @@ results/
     figures/
   empirical/
   oos/
+  volatility_forecasting/
+  funding_controls/
 ```
 
 If the repository is intended as a paper-replication archive, it is acceptable to include selected generated CSVs and figures under `results/`, but raw exchange data should not be redistributed.
@@ -510,6 +701,38 @@ uv run oos_benchmarks \
   --out-dir results/oos
 ```
 
+Run OOS figure generation:
+
+```bash
+uv run python scripts/plot_oos_figures.py \
+  --results-dir results/oos \
+  --data-dir data \
+  --out-dir results/figures \
+  --assets BTC ETH \
+  --activation-assets BTC
+```
+
+Run timeout-safe forecasting diagnostics:
+
+```bash
+uv run python scripts/run_volatility_forecasting_experiments.py \
+  --data-dir data \
+  --all-assets \
+  --out-dir results/volatility_forecasting \
+  --run-validation-selection
+```
+
+Run actual funding-rate control diagnostics:
+
+```bash
+uv run python scripts/run_funding_control_experiments.py \
+  --data-dir data \
+  --funding-dir data/funding_rate \
+  --all-assets \
+  --out-dir results/funding_controls \
+  --funding-window-minutes 60
+```
+
 Run the main workflows sequentially:
 
 ```bash
@@ -517,6 +740,9 @@ uv run synthetic_experiments --out-dir results/synthetic
 uv run simulation_diagnostics --out-dir results/diagnostics
 uv run empirical_calibration --data-dir data --out-dir results/empirical
 uv run oos_benchmarks --data-dir data --out-dir results/oos
+uv run python scripts/plot_oos_figures.py --results-dir results/oos --data-dir data --out-dir results/figures --assets BTC ETH --activation-assets BTC
+uv run python scripts/run_volatility_forecasting_experiments.py --data-dir data --all-assets --out-dir results/volatility_forecasting --run-validation-selection
+uv run python scripts/run_funding_control_experiments.py --data-dir data --funding-dir data/funding_rate --all-assets --out-dir results/funding_controls --funding-window-minutes 60
 ```
 
 ---
@@ -560,6 +786,33 @@ results/oos/static_oos_winsorization_robustness.csv
 results/oos/static_oos_logrv_spec_robustness.csv
 ```
 
+OOS figure outputs:
+
+```text
+results/figures/fig_oos_mse_improvement_btc_eth.pdf
+results/figures/fig_oos_qlike_improvement_btc_eth.pdf
+results/figures/fig_clark_west_pvalues_btc_eth.pdf
+results/figures/fig_activation_episode_BTC.pdf
+```
+
+Volatility forecasting diagnostic outputs:
+
+```text
+results/volatility_forecasting/stronger_benchmark_tests.csv
+results/volatility_forecasting/validation_selected_family_tests.csv
+results/volatility_forecasting/high_volatility_ranking_diagnostics.csv
+results/volatility_forecasting/scheduled_funding_window_diagnostics.csv
+```
+
+Funding-control diagnostic outputs:
+
+```text
+results/funding_controls/actual_funding_control_tests.csv
+results/funding_controls/actual_funding_activation_summary.csv
+results/funding_controls/actual_funding_window_loss_diagnostics.csv
+```
+
+
 ---
 
 ## Notes for paper claims
@@ -574,6 +827,10 @@ The repository follows the revised paper framing:
 - Stability results are Lyapunov-type and excursion-control results, not full geometric ergodicity.
 - Empirical inference uses HAC, robust, batch-means, or OOS loss-comparison methods to address serial dependence.
 - QF-style OOS benchmarks should be presented as incremental volatility-forecasting evidence, not as a standalone trading strategy.
+- OOS figures should be treated as visual summaries of benchmark diagnostics and representative activation episodes, not as separate statistical tests.
+- Stronger HAR-family diagnostics should be presented as robustness evidence that the activation signal remains informative beyond the baseline positive log-HAR specification.
+- Funding-rate control diagnostics should be interpreted as showing that actual funding-rate levels do not subsume the activation signal; they should not be described as causal identification of funding-rate-driven volatility.
+- Funding-window diagnostics are mechanism checks around settlement timing and should not be interpreted as standalone trading signals.
 ```
 
 ---
